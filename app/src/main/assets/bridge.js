@@ -85,6 +85,6 @@
       entry.resolve(response.data);
     }
   };
-  window.NativeBridge.onEvent = null;
-  window.NativeBridge = { call };
+
+  window.NativeBridge = { call, onEvent: null };
 })();
