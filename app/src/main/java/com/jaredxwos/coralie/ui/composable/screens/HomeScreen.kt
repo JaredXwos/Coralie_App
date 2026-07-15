@@ -35,6 +35,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -69,10 +71,13 @@ fun HomeScreen(
     var refreshKey by remember { mutableIntStateOf(0) }
     val scope = rememberCoroutineScope()
 
+    val loadFilesError = stringResource(R.string.error_load_files_failed)
+    val deleteFileError = stringResource(R.string.error_delete_file_failed)
+
     LaunchedEffect(refreshKey) {
         viewModel.retrieveAllFileConfig()
             .onSuccess { files = it }
-            .onFailure { errorMessage = it.message ?: "Couldn't load your files." }
+            .onFailure { errorMessage = it.message ?: loadFilesError }
     }
 
     Column(
@@ -90,14 +95,14 @@ fun HomeScreen(
         ) {
             Column {
                 Text(
-                    text = "App name",
+                    text = stringResource(R.string.app_name),
                     style = MaterialTheme.typography.headlineSmall,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onBackground,
                 )
                 Spacer(Modifier.height(2.dp))
                 Text(
-                    text = "${files.size} file${if (files.size == 1) "" else "s"} saved",
+                    text = pluralStringResource(R.plurals.files_saved_count, files.size, files.size),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.primary,
                 )
@@ -105,7 +110,7 @@ fun HomeScreen(
             SquareIconButton(onClick = { }) {
                 Icon(
                     painter = painterResource(R.drawable.ic_settings),
-                    contentDescription = "Settings",
+                    contentDescription = stringResource(R.string.cd_settings),
                     tint = MaterialTheme.colorScheme.primary,
                 )
             }
@@ -121,8 +126,8 @@ fun HomeScreen(
                 .padding(horizontal = 20.dp, vertical = 12.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
-            SectionLabel("File", modifier = Modifier.padding(start = 16.dp))
-            SectionLabel("Space", modifier = Modifier.padding(end = 30.dp))
+            SectionLabel(stringResource(R.string.header_file), modifier = Modifier.padding(start = 16.dp))
+            SectionLabel(stringResource(R.string.header_space), modifier = Modifier.padding(end = 30.dp))
         }
 
         if (files.isEmpty()) {
@@ -157,7 +162,7 @@ fun HomeScreen(
         ) {
             Icon(
                 painter = painterResource(R.drawable.ic_add),
-                contentDescription = "Add file",
+                contentDescription = stringResource(R.string.cd_add_file),
                 tint = Color.White,
             )
         }
@@ -165,15 +170,15 @@ fun HomeScreen(
 
     pendingDelete?.let { file ->
         AppDialog(
-            title = "Deleting File",
-            message = "Delete \"${file.name}\"? This can't be undone.",
+            title = stringResource(R.string.delete_file_title),
+            message = stringResource(R.string.delete_file_message, file.name),
             onDismiss = { pendingDelete = null },
             isWarning = true,
             buttons = listOf(
-                ButtonConfig(isWarning = false, text = "Cancel", effect = { pendingDelete = null }),
+                ButtonConfig(isWarning = false, text = stringResource(R.string.button_cancel), effect = { pendingDelete = null }),
                 ButtonConfig(
                     isWarning = true,
-                    text = "Delete",
+                    text = stringResource(R.string.button_delete),
                     effect = {
                         scope.launch {
                             viewModel.removeFile(file.assetId)
@@ -183,7 +188,7 @@ fun HomeScreen(
                                 }
                                 .onFailure {
                                     pendingDelete = null
-                                    errorMessage = it.message ?: "Couldn't delete that file."
+                                    errorMessage = it.message ?: deleteFileError
                                 }
                         }
                     },
@@ -194,7 +199,7 @@ fun HomeScreen(
 
     errorMessage?.let { message ->
         AppDialog(
-            title = "Warning!",
+            title = stringResource(R.string.warning_dialog_title),
             message = message,
             onDismiss = { errorMessage = null },
             isWarning = true,
@@ -226,14 +231,14 @@ private fun EmptyFilesState(modifier: Modifier = Modifier) {
         }
         Spacer(Modifier.height(20.dp))
         Text(
-            text = "No files",
+            text = stringResource(R.string.empty_files_title),
             style = MaterialTheme.typography.titleMedium,
             fontWeight = FontWeight.SemiBold,
             color = MaterialTheme.colorScheme.onSurface,
         )
         Spacer(Modifier.height(4.dp))
         Text(
-            text = "Tap the + button to get started",
+            text = stringResource(R.string.empty_files_subtitle),
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
