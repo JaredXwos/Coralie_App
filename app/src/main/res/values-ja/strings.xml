@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">コラリィ</string>
+    <string name="add_file_title">ファイル追加</string>
+    <string name="cd_back">戻る</string>
+    <string name="label_name">ファイル名</string>
+    <string name="placeholder_file_name">ファイル名をつけてください</string>
+    <string name="label_html_file">HTMLファイル</string>
+    <string name="label_space">スペース</string>
+    <string name="placeholder_new_space">スペース名をつけてください</string>
+    <string name="button_confirm">同意する</string>
+    <string name="error_load_spaces_failed">スペースの読み込みに失敗しました</string>
+    <string name="error_save_file_failed">ファイルの保存に失敗しました</string>
+    <string name="error_missing_file_name">ファイル名が必要です</string>
+    <string name="error_missing_file">ファイルを選択してください</string>
+    <string name="error_missing_space">既存のスペースを選んでるか、新しいスペースに名をつけてください</string>
+    <string name="error_dialog_title">ファイルの追加に失敗しました</string>
+    <string name="button_ok">わかりました</string>
+    <string name="cd_settings">設定</string>
+    <string name="header_file">ファイル</string>
+    <string name="header_space">スペース</string>
+    <string name="cd_add_file">ファイル追加</string>
+    <string name="empty_files_title">ファイルは追加されていません</string>
+    <string name="empty_files_subtitle">「+」ボタンをタップすると追加できます</string>
+    <string name="delete_file_title">ファイル削除</string>
+    <string name="delete_file_message">\"%1$s\"の削除してもよろしいでしょうか。元に戻せません。</string>
+    <string name="button_cancel">戻る</string>
+    <string name="button_delete">消す</string>
+    <string name="error_load_files_failed">ファイルの読み込みに失敗しました</string>
+    <string name="error_delete_file_failed">ファイルの削除に失敗しました</string>
+    <string name="warning_dialog_title">注意!</string>
+    <plurals name="files_saved_count">
+        <item quantity="other">%d件のファイルを保存しました</item>
+    </plurals>
+    <string name="button_back">戻る</string>
+    <string name="error_open_space_failed">スペースの起動に失敗しました</string>
+    <string name="error_load_html_failed">ファイルの起動に失敗しました</string>
+    <string name="leave_page_title">ページを閉じる</string>
+    <string name="leave_page_message">このページを閉じてもよろしいでしょうか。データは保存されますので、いつでも再開できます。</string>
+    <string name="button_leave">閉じる</string>
+    <string name="open_file_picker">HTMLファイルを選んでください</string>
+</resources>
