@@ -14,6 +14,9 @@ import com.jaredxwos.coralie.storage.storageRetrieveValue
 import com.jaredxwos.coralie.storage.storageGetTag
 import com.jaredxwos.coralie.storage.storageUpdateValue
 import com.jaredxwos.coralie.storage.storageSetTag
+import com.jaredxwos.coralie.timer.timerCancel
+import com.jaredxwos.coralie.timer.timerList
+import com.jaredxwos.coralie.timer.timerQueue
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
@@ -54,6 +57,9 @@ val callbacks: Map<String, suspend (JsonElement) -> JsonElement> = mapOf(
     "sendMessage"   to ::meshSendMessage,
     "getPeers"      to ::meshGetPeers,
     "closeMesh"     to ::meshClose,
+    "queueTimer"    to ::timerQueue,
+    "cancelTimer"   to ::timerCancel,
+    "listTimers"    to ::timerList,
 )
 
 // Given a request, dispatches the right callback

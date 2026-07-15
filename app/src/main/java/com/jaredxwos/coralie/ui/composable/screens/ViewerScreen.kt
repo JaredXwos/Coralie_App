@@ -46,11 +46,13 @@ import com.jaredxwos.coralie.mesh.AppMesh
 import com.jaredxwos.coralie.bridge.dispatch
 import com.jaredxwos.coralie.storage.AppStorage
 import com.jaredxwos.coralie.storage.AppStorage.internalPathFor
+import com.jaredxwos.coralie.timer.AppTimers
 import com.jaredxwos.coralie.ui.composable.component.SquareIconButton
 import com.jaredxwos.coralie.ui.composable.component.dialogs.AppDialog
 import com.jaredxwos.coralie.ui.composable.component.dialogs.ButtonConfig
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonElement
 import java.io.File
 
 private fun WebSettings.applySecurityModifiers() {
@@ -105,6 +107,7 @@ fun ViewerScreen(
         onDispose {
             AppStorage.closeSpaceSync()
             AppMesh.teardownForPageExit()
+            AppTimers.teardownForPageExit()
         }
     }
 
@@ -125,7 +128,7 @@ fun ViewerScreen(
                         contentDescription = "Back",
                         tint = MaterialTheme.colorScheme.primary,
 
-                    )
+                        )
                 }
                 Text(
                     text = name,
@@ -161,13 +164,19 @@ fun ViewerScreen(
                     factory = { context ->
                         WebView(context).apply {
                             settings.applySecurityModifiers()
-                            AppMesh.attach(scope) { type, data ->
+                            // Shared by AppMesh and AppTimers — both just need "push this
+                            // (type, data) pair into the page's onEvent", the dispatch by
+                            // event name (peers/message/terminalFailure/timerFired) happens
+                            // entirely on the HTML side.
+                            val sendEvent: (String, JsonElement) -> Unit = { type, data ->
                                 evaluateJavascript(
                                     "window.NativeBridge.onEvent && window.NativeBridge.onEvent(${Json.encodeToString(type)}, $data)",
                                     null
                                 )
                             }
+                            AppMesh.attach(scope, sendEvent)
                             AppMesh.rebuild()
+                            AppTimers.attach(scope, sendEvent)
 
                             val assetLoader = WebViewAssetLoader.Builder()
                                 .addPathHandler("/assets/", WebViewAssetLoader.AssetsPathHandler(context))
