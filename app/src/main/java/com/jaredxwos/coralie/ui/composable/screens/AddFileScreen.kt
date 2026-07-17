@@ -45,28 +45,25 @@ import com.jaredxwos.coralie.ui.composable.component.spaceRow.SpaceRowConfig
 import com.jaredxwos.coralie.viewModel.storage.StorageViewModel
 import kotlinx.coroutines.launch
 
-
 @Composable
 fun AddFileScreen(
     viewModel: StorageViewModel,
     onBack: () -> Unit,
     onFileAdded: () -> Unit,
     modifier: Modifier = Modifier,
-    editingAssetId: Long? = null,
     initialName: String = "",
-    initialSpaceName: String = "",
+    initialSpaceId: Long? = null,
+    initialUri: Uri? = null,
 ) {
     val scope = rememberCoroutineScope()
 
-    var name by remember { mutableStateOf("") }
-    var pickedUri by remember { mutableStateOf<Uri?>(null) }
+    var name by remember { mutableStateOf(initialName) }
+    var pickedUri by remember { mutableStateOf(initialUri) }
 
     var spaces by remember { mutableStateOf<List<SpaceRowConfig>>(emptyList()) }
     var isSaving by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
-    var spaceSelection by remember {
-        mutableStateOf(if (initialSpaceName.isNotBlank()) SpaceSelection.New(initialSpaceName) else SpaceSelection.None)
-    }
+    var spaceSelection by remember { mutableStateOf<SpaceSelection>(SpaceSelection.None) }
 
     val loadSpacesError = stringResource(R.string.error_load_spaces_failed)
     val saveFileError = stringResource(R.string.error_save_file_failed)
@@ -78,9 +75,8 @@ fun AddFileScreen(
         viewModel.retrieveAllSpaceConfig()
             .onSuccess { loadedSpaces ->
                 spaces = loadedSpaces
-                // If editing, try to match the space by name and switch to Existing
-                if (editingAssetId != null && initialSpaceName.isNotBlank()) {
-                    val match = loadedSpaces.firstOrNull { it.name == initialSpaceName }
+                if (initialSpaceId != null) {
+                    val match = loadedSpaces.firstOrNull { it.spaceId == initialSpaceId }
                     if (match != null) spaceSelection = SpaceSelection.Existing(match.spaceId)
                 }
             }

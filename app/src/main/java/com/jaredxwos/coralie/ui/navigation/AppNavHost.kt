@@ -2,6 +2,7 @@ package com.jaredxwos.coralie.ui.navigation
 
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.core.net.toUri
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -27,11 +28,11 @@ fun AppNavHost(
                     spaceId = config.spaceId,
                     name = config.name,
                 )) },
-                onEditFileClicked = { config -> navController.navigate(EditFileRoute(
+                onEditFileClicked = { config, uri -> navController.navigate(EditFileRoute(
                     assetId = config.assetId,
                     spaceId = config.spaceId,
                     existingName = config.name,
-                    existingSpaceName = config.spaceName,  // assumes FileRowConfig has this
+                    sourceUri = uri,
                 )) },
             )
         }
@@ -48,9 +49,9 @@ fun AppNavHost(
                 viewModel = LiveStorageViewModel,
                 onBack = { navController.popBackStack() },
                 onFileAdded = { navController.popBackStack() },
-                editingAssetId = route.assetId,
                 initialName = route.existingName,
-                initialSpaceName = route.existingSpaceName,
+                initialSpaceId = route.spaceId,
+                initialUri = route.sourceUri.toUri()
             )
         }
         composable<ViewerRoute> { backStackEntry ->

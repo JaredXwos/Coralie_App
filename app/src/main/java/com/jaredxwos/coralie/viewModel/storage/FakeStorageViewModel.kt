@@ -83,6 +83,10 @@ class FakeStorageViewModel : StorageViewModel {
         return Result.success(Unit)
     }
 
+    override suspend fun retrieveFileUri(assetId: Long): Result<String> {
+        return Result.success("")
+    }
+
     // --- No-ops below: not wired to any UI action yet (§7 Open items). ---
 
     override suspend fun renameFile(assetId: Long, name: String): Result<Unit> {

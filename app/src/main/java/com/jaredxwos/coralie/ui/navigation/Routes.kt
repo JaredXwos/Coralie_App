@@ -11,7 +11,7 @@ data class EditFileRoute(
     val assetId: Long,
     val spaceId: Long,
     val existingName: String,
-    val existingSpaceName: String,
+    val sourceUri: String,
 )
 @Serializable
 data class ViewerRoute(

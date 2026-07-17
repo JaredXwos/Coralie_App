@@ -90,12 +90,8 @@ object AppStorage {
             internalPathFor(assetId)).getOrThrow()
     }
 
-    suspend fun updateHtmlName(assetId: Long, name: String): Result<Unit> = exceptionLogger { dao ->
-        dao.updateHtmlName(assetId, name)
-    }
-
-    suspend fun updateHtmlUri(assetId: Long, sourceUri: String): Result<Unit> = exceptionLogger { dao ->
-        dao.updateHtmlUri(assetId, sourceUri)
+    suspend fun retrieveUri(assetId: Long): Result<String> = exceptionLogger { dao ->
+        dao.retrieveUri(assetId)
     }
 
     suspend fun removeHtml(assetId: Long): Result<Unit> = exceptionLogger { dao ->

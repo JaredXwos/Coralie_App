@@ -57,6 +57,9 @@ object LiveStorageViewModel : StorageViewModel {
     override suspend fun removeFile(assetId: Long): Result<Unit> =
         AppStorage.removeHtml(assetId)
 
+    override suspend fun retrieveFileUri(assetId: Long): Result<String> =
+        AppStorage.retrieveUri(assetId)
+
     // --- Not yet wired (§7 Open items) ---
 
     override suspend fun renameFile(assetId: Long, name: String): Result<Unit> {

@@ -63,7 +63,7 @@ fun HomeScreen(
     viewModel: StorageViewModel,
     onAddFileClicked: () -> Unit,
     onOpenFileClicked: (FileRowConfig) -> Unit,
-    onEditFileClicked: (FileRowConfig) -> Unit,
+    onEditFileClicked: (FileRowConfig, String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var files by remember { mutableStateOf<List<FileRowConfig>>(emptyList()) }
@@ -148,7 +148,13 @@ fun HomeScreen(
                         file = file,
                         onTap = { onOpenFileClicked(file) },
                         onSwipeDelete = { pendingDelete = file },
-                        onLongPress = { onEditFileClicked(file) },
+                        onLongPress = {
+                            scope.launch {
+                                viewModel.retrieveFileUri(file.assetId)
+                                    .onSuccess { uri -> onEditFileClicked(file, uri) }
+                                    .onFailure { errorMessage = it.message ?: loadFilesError }
+                            }
+                        },
                     )
                 }
             }
