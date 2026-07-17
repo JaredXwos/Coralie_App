@@ -105,6 +105,10 @@ object AppStorage {
         dao.retrieveAllDomain()
     }
 
+    suspend fun allowDomain(domainUri: String): Result<Unit> = exceptionLogger { dao ->
+        dao.allowDomain(domainUri)
+    }
+
     suspend fun isDomainAllowed(domainUri: String): Result<Boolean> = exceptionLogger { dao ->
         dao.domainAllowed(domainUri)
     }

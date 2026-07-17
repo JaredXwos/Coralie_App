@@ -62,6 +62,8 @@ android {
 dependencies {
     implementation(project(":connection"))
     implementation(platform(libs.androidx.compose.bom))
+    implementation(platform(libs.okhttp.bom))
+    implementation(libs.okhttp)
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.activity.ktx)
     implementation(libs.androidx.appcompat)

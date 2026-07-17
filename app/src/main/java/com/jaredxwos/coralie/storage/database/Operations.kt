@@ -99,6 +99,8 @@ interface AppDao {
     suspend fun retrieveAllDomain(): List<String>
     @Query("SELECT EXISTS(SELECT 1 FROM domain WHERE domainUri = :domain)")
     suspend fun domainAllowed(domain: String): Boolean
+    @Query("INSERT INTO domain (domainUri) VALUES (:domain)")
+    suspend fun allowDomain(domain: String)
     @Query("DELETE FROM domain WHERE domainUri = :domain")
     suspend fun disallowDomain(domain: String)
 }

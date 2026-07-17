@@ -60,6 +60,7 @@ val callbacks: Map<String, suspend (JsonElement) -> JsonElement> = mapOf(
     "queueTimer"    to ::timerQueue,
     "cancelTimer"   to ::timerCancel,
     "listTimers"    to ::timerList,
+    "httpRequest"   to ::proxyHttpRequest
 )
 
 // Given a request, dispatches the right callback
