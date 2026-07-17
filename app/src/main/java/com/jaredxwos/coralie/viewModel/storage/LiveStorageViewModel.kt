@@ -1,7 +1,6 @@
 package com.jaredxwos.coralie.viewModel.storage
 
 import android.net.Uri
-import com.jaredxwos.coralie.connection.DataChannelFrame
 import com.jaredxwos.coralie.storage.AppStorage
 import com.jaredxwos.coralie.ui.composable.component.fileRow.FileRowConfig
 import com.jaredxwos.coralie.ui.composable.component.spaceRow.SpaceRowConfig

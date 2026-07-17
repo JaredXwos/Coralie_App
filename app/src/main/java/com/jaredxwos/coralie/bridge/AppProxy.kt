@@ -4,8 +4,6 @@ import com.jaredxwos.coralie.storage.AppStorage
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -91,17 +89,6 @@ object AppProxy {
     private var pending: CompletableDeferred<Decision>? = null
 
     private val _prompt = MutableStateFlow<String?>(null)
-    /** Domain awaiting a decision, or null. Observed by ViewerScreen. */
-    val prompt: StateFlow<String?> = _prompt.asStateFlow()
-
-    /** Called by the UI when the user taps a dialog button. */
-    fun resolvePrompt(decision: Decision) { pending?.complete(decision) }
-
-    fun teardownForPageExit() {
-        sessionAllow.clear()
-        sessionReject.clear()
-        pending?.complete(Decision.REJECT)   // unblock anything still awaiting
-    }
 
     internal suspend fun authorize(domain: String): Boolean {
         if (domain in sessionAllow || isPersistedAllowed(domain)) return true
@@ -154,14 +141,14 @@ object AppProxy {
             req.headers.forEach { (k, v) -> builder.addHeader(k, v) }
 
             client.newCall(builder.build()).execute().use { resp ->
-                if ((resp.body?.contentLength() ?: -1L) > MAX_RESPONSE_BYTES)
+                if (resp.body.contentLength() > MAX_RESPONSE_BYTES)
                     throw IOException("Response exceeds size limit")
 
                 HttpResponseData(
                     status = resp.code,
                     statusText = resp.message,
                     headers = resp.headers.toMultimap().mapValues { (_, v) -> v.joinToString(", ") },
-                    body = resp.body?.string(),
+                    body = resp.body.string(),
                 )
             }
         }
