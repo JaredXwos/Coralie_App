@@ -87,6 +87,18 @@ class FakeStorageViewModel : StorageViewModel {
         return Result.success("")
     }
 
+    override suspend fun retrieveAllAllowedDomains(): Result<List<String>> {
+        return Result.success(emptyList())
+    }
+
+    override suspend fun isDomainAllowed(domainUri: String): Result<Boolean> {
+        return Result.success(false)
+    }
+
+    override suspend fun disallowDomain(domainUri: String): Result<Unit> {
+        return Result.success(Unit)
+    }
+
     // --- No-ops below: not wired to any UI action yet (§7 Open items). ---
 
     override suspend fun renameFile(assetId: Long, name: String): Result<Unit> {

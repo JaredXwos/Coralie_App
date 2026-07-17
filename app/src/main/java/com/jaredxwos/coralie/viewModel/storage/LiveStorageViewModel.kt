@@ -1,6 +1,7 @@
 package com.jaredxwos.coralie.viewModel.storage
 
 import android.net.Uri
+import com.jaredxwos.coralie.connection.DataChannelFrame
 import com.jaredxwos.coralie.storage.AppStorage
 import com.jaredxwos.coralie.ui.composable.component.fileRow.FileRowConfig
 import com.jaredxwos.coralie.ui.composable.component.spaceRow.SpaceRowConfig
@@ -59,6 +60,10 @@ object LiveStorageViewModel : StorageViewModel {
 
     override suspend fun retrieveFileUri(assetId: Long): Result<String> =
         AppStorage.retrieveSourceUri(assetId)
+
+    override suspend fun retrieveAllAllowedDomains(): Result<List<String>> = AppStorage.retrieveAllDomains()
+    override suspend fun isDomainAllowed(domainUri: String): Result<Boolean> = AppStorage.isDomainAllowed(domainUri)
+    override suspend fun disallowDomain(domainUri: String): Result<Unit> = AppStorage.disallowDomain(domainUri)
 
     // --- Not yet wired (§7 Open items) ---
 

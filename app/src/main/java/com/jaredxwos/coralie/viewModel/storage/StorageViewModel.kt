@@ -11,6 +11,9 @@ interface StorageViewModel{
     suspend fun saveNewFileToNewSpace(spaceName: String, name: String, uri: Uri): Result<Long>
     suspend fun removeFile(assetId: Long): Result<Unit>
     suspend fun retrieveFileUri(assetId: Long): Result<String>
+    suspend fun retrieveAllAllowedDomains(): Result<List<String>>
+    suspend fun isDomainAllowed(domainUri: String): Result<Boolean>
+    suspend fun disallowDomain(domainUri: String): Result<Unit>
     suspend fun renameFile(assetId: Long, name: String): Result<Unit>
     suspend fun renameSpace(spaceId: Long, name: String): Result<Unit>
     suspend fun changeFileUri(assetId: Long, uri: Uri): Result<Unit>
