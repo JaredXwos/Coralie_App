@@ -72,7 +72,9 @@ fun ComponentGallery(modifier: Modifier = Modifier) {
                 FileRowConfig(1L, 2L, "-w-", "Work"),
                 FileRowConfig(2L, 1L, "owo", "Personal"),
                 FileRowConfig(3L, 3L, "uwu", "uwu stuff"),
-            ).forEach { FileRow(file = it, onTap = {}, onSwipeDelete = {}) }
+            ).forEach { FileRow(
+                file = it, onTap = {}, onSwipeDelete = {}, onLongPress = {}
+            ) }
         }
     }
 }

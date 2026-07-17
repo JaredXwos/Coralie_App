@@ -3,6 +3,7 @@ package com.jaredxwos.coralie.ui.composable.component.fileRow
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -41,6 +42,7 @@ fun FileRow(
     file: FileRowConfig,
     onTap: () -> Unit,
     onSwipeDelete: () -> Unit,
+    onLongPress: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val scope = rememberCoroutineScope()
@@ -60,7 +62,10 @@ fun FileRow(
                 .fillMaxWidth()
                 .background(MaterialTheme.colorScheme.surface, MaterialTheme.shapes.small)
                 .border(2.dp, MaterialTheme.colorScheme.secondary, MaterialTheme.shapes.small)
-                .clickable(onClick = onTap)
+                .combinedClickable(          // ← was .clickable(onClick = onTap)
+                    onClick = onTap,
+                    onLongClick = onLongPress,
+                )
                 .padding(16.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -110,7 +115,7 @@ private fun FileRowPreview() {
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            rows.forEach { FileRow(file = it, onTap = {}, onSwipeDelete = {}) }
+            rows.forEach { FileRow(file = it, onTap = {}, onSwipeDelete = {}, onLongPress = {}) }
         }
     }
 }

@@ -63,6 +63,7 @@ fun HomeScreen(
     viewModel: StorageViewModel,
     onAddFileClicked: () -> Unit,
     onOpenFileClicked: (FileRowConfig) -> Unit,
+    onEditFileClicked: (FileRowConfig) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var files by remember { mutableStateOf<List<FileRowConfig>>(emptyList()) }
@@ -147,6 +148,7 @@ fun HomeScreen(
                         file = file,
                         onTap = { onOpenFileClicked(file) },
                         onSwipeDelete = { pendingDelete = file },
+                        onLongPress = { onEditFileClicked(file) },
                     )
                 }
             }

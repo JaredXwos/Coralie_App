@@ -6,7 +6,13 @@ data object HomeRoute
 
 @Serializable
 data object AddFileRoute
-
+@Serializable
+data class EditFileRoute(
+    val assetId: Long,
+    val spaceId: Long,
+    val existingName: String,
+    val existingSpaceName: String,
+)
 @Serializable
 data class ViewerRoute(
     val assetId: Long,

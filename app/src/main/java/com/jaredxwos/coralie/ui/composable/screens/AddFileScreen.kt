@@ -52,6 +52,9 @@ fun AddFileScreen(
     onBack: () -> Unit,
     onFileAdded: () -> Unit,
     modifier: Modifier = Modifier,
+    editingAssetId: Long? = null,
+    initialName: String = "",
+    initialSpaceName: String = "",
 ) {
     val scope = rememberCoroutineScope()
 
@@ -61,7 +64,9 @@ fun AddFileScreen(
     var spaces by remember { mutableStateOf<List<SpaceRowConfig>>(emptyList()) }
     var isSaving by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
-    var spaceSelection by remember { mutableStateOf<SpaceSelection>(SpaceSelection.None) }
+    var spaceSelection by remember {
+        mutableStateOf(if (initialSpaceName.isNotBlank()) SpaceSelection.New(initialSpaceName) else SpaceSelection.None)
+    }
 
     val loadSpacesError = stringResource(R.string.error_load_spaces_failed)
     val saveFileError = stringResource(R.string.error_save_file_failed)
@@ -71,7 +76,14 @@ fun AddFileScreen(
 
     LaunchedEffect(Unit) {
         viewModel.retrieveAllSpaceConfig()
-            .onSuccess { spaces = it }
+            .onSuccess { loadedSpaces ->
+                spaces = loadedSpaces
+                // If editing, try to match the space by name and switch to Existing
+                if (editingAssetId != null && initialSpaceName.isNotBlank()) {
+                    val match = loadedSpaces.firstOrNull { it.name == initialSpaceName }
+                    if (match != null) spaceSelection = SpaceSelection.Existing(match.spaceId)
+                }
+            }
             .onFailure { errorMessage = it.message ?: loadSpacesError }
     }
 
