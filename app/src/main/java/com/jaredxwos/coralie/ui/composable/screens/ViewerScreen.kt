@@ -27,6 +27,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -44,6 +45,7 @@ import androidx.webkit.WebViewFeature
 import com.jaredxwos.coralie.R
 import com.jaredxwos.coralie.mesh.AppMesh
 import com.jaredxwos.coralie.bridge.dispatch
+import com.jaredxwos.coralie.bridge.AppProxy
 import com.jaredxwos.coralie.storage.AppStorage
 import com.jaredxwos.coralie.storage.AppStorage.internalPathFor
 import com.jaredxwos.coralie.timer.AppTimers
@@ -108,6 +110,7 @@ fun ViewerScreen(
             AppStorage.closeSpaceSync()
             AppMesh.teardownForPageExit()
             AppTimers.teardownForPageExit()
+            AppProxy.teardownForPageExit()
         }
     }
 
@@ -245,6 +248,32 @@ fun ViewerScreen(
                         onBack()
                     }
                 ),
+            ),
+        )
+    }
+
+    // --- Native-HTTP consent prompt: shown whenever AppProxy needs a decision
+    // for a domain not already on the allowlist for this page/session. ---
+    val permissionDomain by AppProxy.prompt.collectAsState()
+    permissionDomain?.let { domain ->
+        AppDialog(
+            title = "Allow network request?",
+            message = "This page is trying to reach \"$domain\". Allow it to send the request?",
+            onDismiss = { AppProxy.resolvePrompt(AppProxy.Decision.REJECT) },
+            isWarning = true,
+            buttons = listOf(
+                ButtonConfig(
+                    isWarning = false,
+                    text = "Reject",
+                    effect = { AppProxy.resolvePrompt(AppProxy.Decision.REJECT) }),
+                ButtonConfig(
+                    isWarning = false,
+                    text = "Allow",
+                    effect = { AppProxy.resolvePrompt(AppProxy.Decision.ALLOW_ONCE) }),
+                ButtonConfig(
+                    isWarning = true,
+                    text = "Always allow",
+                    effect = { AppProxy.resolvePrompt(AppProxy.Decision.ALLOW_ALWAYS) }),
             ),
         )
     }

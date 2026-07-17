@@ -8,6 +8,7 @@ import com.jaredxwos.coralie.storage.database.AppDao
 import com.jaredxwos.coralie.storage.database.Entry
 import com.jaredxwos.coralie.storage.database.Html
 import com.jaredxwos.coralie.storage.database.Space
+import com.jaredxwos.coralie.storage.database.UriEntry
 
 // SCHEMA
 // ──────────────────────────────────────────────────────
@@ -19,7 +20,7 @@ import com.jaredxwos.coralie.storage.database.Space
 // PK: primary key, AI: auto increment, FK: foreign key, NN: not null
 
 @Database(
-    entities = [Space::class, Html::class, Entry::class],
+    entities = [Space::class, Html::class, Entry::class, UriEntry::class],
     version = 1,
     exportSchema = false
 )

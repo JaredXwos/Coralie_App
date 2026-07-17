@@ -4,6 +4,8 @@ import com.jaredxwos.coralie.storage.AppStorage
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -89,6 +91,17 @@ object AppProxy {
     private var pending: CompletableDeferred<Decision>? = null
 
     private val _prompt = MutableStateFlow<String?>(null)
+
+    val prompt: StateFlow<String?> = _prompt.asStateFlow()
+
+    /** Called by the UI when the user taps a dialog button. */
+    fun resolvePrompt(decision: Decision) { pending?.complete(decision) }
+
+    fun teardownForPageExit() {
+        sessionAllow.clear()
+        sessionReject.clear()
+        pending?.complete(Decision.REJECT)   // unblock anything still awaiting
+    }
 
     internal suspend fun authorize(domain: String): Boolean {
         if (domain in sessionAllow || isPersistedAllowed(domain)) return true
