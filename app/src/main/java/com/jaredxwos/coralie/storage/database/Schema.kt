@@ -10,6 +10,7 @@ import androidx.room.PrimaryKey
 // Spaces   ( space_id PK AI NN, name NN )
 // Html     ( asset_id PK AI NN, name NN, space_id FK → Spaces.space_id NN, sourceUri NN, )
 // Data     ( space_id PK FK → Spaces.space_id NN, name PK NN, value NN, tag )
+// Uri      ( uri PK NN )
 // ──────────────────────────────────────────────────────
 // FK cascade: deleting a Space deletes its Html and Data rows
 // AI: Auto increment
@@ -54,3 +55,9 @@ data class Entry(
     val value: String,
     val tag: String?
 )
+
+@Entity(
+    tableName = "domain",
+    primaryKeys = ["domainUri"]
+)
+data class UriEntry(val domainUri: String)

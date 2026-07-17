@@ -90,7 +90,7 @@ object AppStorage {
             internalPathFor(assetId)).getOrThrow()
     }
 
-    suspend fun retrieveUri(assetId: Long): Result<String> = exceptionLogger { dao ->
+    suspend fun retrieveSourceUri(assetId: Long): Result<String> = exceptionLogger { dao ->
         dao.retrieveUri(assetId)
     }
 
@@ -99,5 +99,17 @@ object AppStorage {
         dao.deleteHtml(assetId)
         if (!dao.uriExists(sourceUri))
             PersistentUri.release(sourceUri.toUri()).getOrThrow()
+    }
+
+    suspend fun retrieveAllDomains(): Result<List<String>> = exceptionLogger { dao ->
+        dao.retrieveAllDomain()
+    }
+
+    suspend fun isDomainAllowed(domainUri: String): Result<Boolean> = exceptionLogger { dao ->
+        dao.domainAllowed(domainUri)
+    }
+
+    suspend fun disallowDomain(domainUri: String): Result<Unit> = exceptionLogger { dao ->
+        dao.disallowDomain(domainUri)
     }
 }

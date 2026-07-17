@@ -95,4 +95,10 @@ interface AppDao {
 
     @Query("DELETE FROM store WHERE spaceId = :spaceId")
     suspend fun clearSpace(spaceId: Long)
+    @Query("SELECT domainUri FROM domain")
+    suspend fun retrieveAllDomain(): List<String>
+    @Query("SELECT EXISTS(SELECT 1 FROM domain WHERE domainUri = :domain)")
+    suspend fun domainAllowed(domain: String): Boolean
+    @Query("DELETE FROM domain WHERE domainUri = :domain")
+    suspend fun disallowDomain(domain: String)
 }

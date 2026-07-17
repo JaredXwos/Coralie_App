@@ -58,7 +58,7 @@ object LiveStorageViewModel : StorageViewModel {
         AppStorage.removeHtml(assetId)
 
     override suspend fun retrieveFileUri(assetId: Long): Result<String> =
-        AppStorage.retrieveUri(assetId)
+        AppStorage.retrieveSourceUri(assetId)
 
     // --- Not yet wired (§7 Open items) ---
 
