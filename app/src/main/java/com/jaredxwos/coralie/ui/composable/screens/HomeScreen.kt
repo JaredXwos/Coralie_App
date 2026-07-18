@@ -64,6 +64,7 @@ fun HomeScreen(
     onAddFileClicked: () -> Unit,
     onOpenFileClicked: (FileRowConfig) -> Unit,
     onEditFileClicked: (FileRowConfig, String) -> Unit,
+    onSettingsClicked: ()-> Unit,
     modifier: Modifier = Modifier,
 ) {
     var files by remember { mutableStateOf<List<FileRowConfig>>(emptyList()) }
@@ -108,7 +109,7 @@ fun HomeScreen(
                     color = MaterialTheme.colorScheme.primary,
                 )
             }
-            SquareIconButton(onClick = { }) {
+            SquareIconButton(onClick = onSettingsClicked) {
                 Icon(
                     painter = painterResource(R.drawable.ic_settings),
                     contentDescription = stringResource(R.string.cd_settings),

@@ -34,6 +34,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import com.jaredxwos.coralie.R
+import com.jaredxwos.coralie.ui.composable.component.EmptyHint
 import com.jaredxwos.coralie.ui.composable.component.rows.DomainRow
 import com.jaredxwos.coralie.ui.composable.component.SectionLabel
 import com.jaredxwos.coralie.ui.composable.component.SquareIconButton
@@ -246,11 +247,6 @@ fun SettingsScreen(
             isWarning = true,
         )
     }
-}
-
-@Composable
-fun EmptyHint(x0: String) {
-    TODO("Not yet implemented")
 }
 
 

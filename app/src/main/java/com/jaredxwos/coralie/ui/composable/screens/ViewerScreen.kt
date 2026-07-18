@@ -114,7 +114,7 @@ fun ViewerScreen(
             AppProxy.teardownForPageExit()
         }
     }
-    BackHandler(onBack = onBack)
+    BackHandler(onBack = { showLeaveConfirmation = true })
 
     Column(modifier = modifier.fillMaxSize()) {
         // --- Top bar: back / settings row, then title, then divider. Shown in every LoadStatus. ---

@@ -35,6 +35,7 @@ fun AppNavHost(
                     existingName = config.name,
                     sourceUri = uri,
                 )) },
+                onSettingsClicked = { navController.navigate(SettingsRoute)}
             )
         }
         composable<AddFileRoute> {
@@ -62,7 +63,7 @@ fun AppNavHost(
                 spaceId = route.spaceId,
                 name = route.name,
                 onBack = { navController.popBackStack() },
-                onSettings = { },
+                onSettings = { navController.navigate(SettingsRoute)},
             )
         }
         composable<SettingsRoute> {
