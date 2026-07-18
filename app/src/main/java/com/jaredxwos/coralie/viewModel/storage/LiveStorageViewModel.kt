@@ -2,8 +2,9 @@ package com.jaredxwos.coralie.viewModel.storage
 
 import android.net.Uri
 import com.jaredxwos.coralie.storage.AppStorage
-import com.jaredxwos.coralie.ui.composable.component.fileRow.FileRowConfig
-import com.jaredxwos.coralie.ui.composable.component.spaceRow.SpaceRowConfig
+import com.jaredxwos.coralie.ui.composable.component.rows.fileRow.FileRowConfig
+import com.jaredxwos.coralie.ui.composable.component.rows.spaceRow.SpaceRowConfig
+import com.jaredxwos.coralie.ui.composable.component.rows.spaceUsageRow.SpaceUsage
 
 /**
  * [StorageViewModel] backed by [AppStorage].
@@ -39,6 +40,21 @@ object LiveStorageViewModel : StorageViewModel {
             spaces.map { SpaceRowConfig(spaceId = it.spaceId, name = it.name) }
         }
 
+    // Settings screen: same rows as retrieveAllSpaceConfig, plus each space's
+    // HTML count. Kept separate so SpaceRowConfig's shape (used by the file-add
+    // flow) doesn't change.
+    override suspend fun retrieveAllSpaceUsage(): Result<List<SpaceUsage>> {
+        val spaces = AppStorage.retrieveAllSpaces().getOrElse { return Result.failure(it) }
+        val html = AppStorage.retrieveAllHtml().getOrElse { return Result.failure(it) }
+        val countById = html.groupingBy { it.spaceId }.eachCount()
+        return Result.success(
+            spaces.map { SpaceUsage(it.spaceId, it.name, countById[it.spaceId] ?: 0) },
+        )
+    }
+
+    override suspend fun clearSpace(spaceId: Long): Result<Unit> = AppStorage.clearSpace(spaceId)
+    override suspend fun deleteSpace(spaceId: Long): Result<Unit> = AppStorage.deleteSpace(spaceId)
+
     override suspend fun saveNewFileToExistingSpace(
         spaceId: Long,
         name: String,
@@ -64,21 +80,4 @@ object LiveStorageViewModel : StorageViewModel {
     override suspend fun isDomainAllowed(domainUri: String): Result<Boolean> = AppStorage.isDomainAllowed(domainUri)
     override suspend fun disallowDomain(domainUri: String): Result<Unit> = AppStorage.disallowDomain(domainUri)
 
-    // --- Not yet wired (§7 Open items) ---
-
-    override suspend fun renameFile(assetId: Long, name: String): Result<Unit> {
-        TODO("renameFile not yet implemented — wire to AppStorage.updateHtmlName")
-    }
-
-    override suspend fun renameSpace(spaceId: Long, name: String): Result<Unit> {
-        TODO("renameSpace not yet implemented — wire to AppStorage.updateSpaceName")
-    }
-
-    override suspend fun changeFileUri(assetId: Long, uri: Uri): Result<Unit> {
-        TODO("changeFileUri not yet implemented — wire to AppStorage.updateHtmlUri (+ old-URI release?)")
-    }
-
-    override suspend fun removeSpace(spaceId: Long): Result<Unit> {
-        TODO("removeSpace not yet implemented — wire to AppStorage.deleteSpace (+ isSpaceLinked check?)")
-    }
 }

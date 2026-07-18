@@ -10,6 +10,7 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.toRoute
 import com.jaredxwos.coralie.ui.composable.screens.AddFileScreen
 import com.jaredxwos.coralie.ui.composable.screens.HomeScreen
+import com.jaredxwos.coralie.ui.composable.screens.SettingsScreen
 import com.jaredxwos.coralie.ui.composable.screens.ViewerScreen
 import com.jaredxwos.coralie.viewModel.storage.LiveStorageViewModel
 
@@ -62,6 +63,12 @@ fun AppNavHost(
                 name = route.name,
                 onBack = { navController.popBackStack() },
                 onSettings = { },
+            )
+        }
+        composable<SettingsRoute> {
+            SettingsScreen(
+                viewModel = LiveStorageViewModel,
+                onBackClicked = { navController.popBackStack() }
             )
         }
     }

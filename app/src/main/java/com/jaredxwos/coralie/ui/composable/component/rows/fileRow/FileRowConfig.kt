@@ -1,4 +1,4 @@
-package com.jaredxwos.coralie.ui.composable.component.fileRow
+package com.jaredxwos.coralie.ui.composable.component.rows.fileRow
 
 import kotlinx.serialization.Serializable
 

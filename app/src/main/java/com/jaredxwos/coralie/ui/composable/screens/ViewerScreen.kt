@@ -10,6 +10,7 @@ import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -113,6 +114,7 @@ fun ViewerScreen(
             AppProxy.teardownForPageExit()
         }
     }
+    BackHandler(onBack = onBack)
 
     Column(modifier = modifier.fillMaxSize()) {
         // --- Top bar: back / settings row, then title, then divider. Shown in every LoadStatus. ---

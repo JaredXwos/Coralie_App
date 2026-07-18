@@ -1,6 +1,7 @@
 package com.jaredxwos.coralie.ui.composable.screens
 
 import android.net.Uri
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -40,8 +41,8 @@ import com.jaredxwos.coralie.ui.composable.component.SectionLabel
 import com.jaredxwos.coralie.ui.composable.component.SquareIconButton
 import com.jaredxwos.coralie.ui.composable.component.dialogs.AppDialog
 import com.jaredxwos.coralie.ui.composable.component.dialogs.ButtonConfig
-import com.jaredxwos.coralie.ui.composable.component.spaceRow.SpaceRow
-import com.jaredxwos.coralie.ui.composable.component.spaceRow.SpaceRowConfig
+import com.jaredxwos.coralie.ui.composable.component.rows.spaceRow.SpaceRow
+import com.jaredxwos.coralie.ui.composable.component.rows.spaceRow.SpaceRowConfig
 import com.jaredxwos.coralie.viewModel.storage.StorageViewModel
 import kotlinx.coroutines.launch
 
@@ -82,6 +83,7 @@ fun AddFileScreen(
             }
             .onFailure { errorMessage = it.message ?: loadSpacesError }
     }
+    BackHandler(onBack = onBack)
 
     val filePicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()

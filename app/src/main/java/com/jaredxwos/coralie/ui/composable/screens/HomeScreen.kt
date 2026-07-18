@@ -47,8 +47,8 @@ import com.jaredxwos.coralie.ui.composable.component.SectionLabel
 import com.jaredxwos.coralie.ui.composable.component.SquareIconButton
 import com.jaredxwos.coralie.ui.composable.component.dialogs.AppDialog
 import com.jaredxwos.coralie.ui.composable.component.dialogs.ButtonConfig
-import com.jaredxwos.coralie.ui.composable.component.fileRow.FileRow
-import com.jaredxwos.coralie.ui.composable.component.fileRow.FileRowConfig
+import com.jaredxwos.coralie.ui.composable.component.rows.fileRow.FileRow
+import com.jaredxwos.coralie.ui.composable.component.rows.fileRow.FileRowConfig
 import com.jaredxwos.coralie.viewModel.storage.StorageViewModel
 
 /**

@@ -1,4 +1,4 @@
-package com.jaredxwos.coralie.ui.composable.component.spaceRow
+package com.jaredxwos.coralie.ui.composable.component.rows.spaceRow
 
 data class SpaceRowConfig(
     val spaceId: Long,

@@ -101,6 +101,18 @@ object AppStorage {
             PersistentUri.release(sourceUri.toUri()).getOrThrow()
     }
 
+    suspend fun clearSpace(spaceId: Long): Result<Unit> = exceptionLogger { dao ->
+        // Clearing the active space would leave the open HtmlStorage pointing at
+        // rows we're about to remove, so close it first — the Space itself stays.
+        if (currentSpaceId == spaceId) closeSpace()
+        val htmls = dao.retrieveAllHtml().filter { it.spaceId == spaceId }
+        for (html in htmls) {
+            dao.deleteHtml(html.assetId)
+            if (!dao.uriExists(html.sourceUri))
+                PersistentUri.release(html.sourceUri.toUri()).getOrThrow()
+        }
+    }
+
     suspend fun retrieveAllDomains(): Result<List<String>> = exceptionLogger { dao ->
         dao.retrieveAllDomain()
     }

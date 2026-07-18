@@ -23,8 +23,8 @@ import androidx.compose.ui.unit.dp
 import com.jaredxwos.coralie.R
 import com.jaredxwos.coralie.ui.composable.component.dialogs.AppDialog
 import com.jaredxwos.coralie.ui.composable.component.dialogs.ButtonConfig
-import com.jaredxwos.coralie.ui.composable.component.fileRow.FileRow
-import com.jaredxwos.coralie.ui.composable.component.fileRow.FileRowConfig
+import com.jaredxwos.coralie.ui.composable.component.rows.fileRow.FileRow
+import com.jaredxwos.coralie.ui.composable.component.rows.fileRow.FileRowConfig
 import com.jaredxwos.coralie.ui.theme.HtmlHosterTheme
 
 /**

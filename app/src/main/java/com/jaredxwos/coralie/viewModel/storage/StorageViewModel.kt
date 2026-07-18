@@ -1,8 +1,9 @@
 package com.jaredxwos.coralie.viewModel.storage
 
 import android.net.Uri
-import com.jaredxwos.coralie.ui.composable.component.fileRow.FileRowConfig
-import com.jaredxwos.coralie.ui.composable.component.spaceRow.SpaceRowConfig
+import com.jaredxwos.coralie.ui.composable.component.rows.fileRow.FileRowConfig
+import com.jaredxwos.coralie.ui.composable.component.rows.spaceRow.SpaceRowConfig
+import com.jaredxwos.coralie.ui.composable.component.rows.spaceUsageRow.SpaceUsage
 
 interface StorageViewModel{
     suspend fun retrieveAllFileConfig(): Result<List<FileRowConfig>>
@@ -14,8 +15,7 @@ interface StorageViewModel{
     suspend fun retrieveAllAllowedDomains(): Result<List<String>>
     suspend fun isDomainAllowed(domainUri: String): Result<Boolean>
     suspend fun disallowDomain(domainUri: String): Result<Unit>
-    suspend fun renameFile(assetId: Long, name: String): Result<Unit>
-    suspend fun renameSpace(spaceId: Long, name: String): Result<Unit>
-    suspend fun changeFileUri(assetId: Long, uri: Uri): Result<Unit>
-    suspend fun removeSpace(spaceId: Long): Result<Unit>
+    suspend fun retrieveAllSpaceUsage(): Result<List<SpaceUsage>>
+    suspend fun clearSpace(spaceId: Long): Result<Unit>
+    suspend fun deleteSpace(spaceId: Long): Result<Unit>
 }

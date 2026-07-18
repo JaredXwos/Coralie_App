@@ -14,7 +14,6 @@
     <string name="button_confirm">Confirm</string>
 
     <!-- Errors -->
-    <string name="error_load_spaces_failed">Failed to load spaces.</string>
     <string name="error_save_file_failed">Failed to save file.</string>
     <string name="error_missing_file_name">Please enter a file name.</string>
     <string name="error_missing_file">Please pick an HTML file.</string>
@@ -55,5 +54,36 @@
     <string name="button_leave">Leave</string>
 
     <string name="open_file_picker">Tap to pick an HTML file…</string>
+
+    <!-- Settings screen -->
+    <string name="settings_title">Settings</string>
+
+    <!-- Section headers -->
+    <string name="header_allowed_domains">ALLOWED DOMAINS</string>
+
+    <!-- Empty states -->
+    <string name="settings_no_domains">No domains allowed yet. Allowed domains can load content inside your files.</string>
+
+    <!-- Manage-space dialog (long press on a space) -->
+    <string name="settings_manage_space_title">Manage \"%1$s\"</string>
+    <string name="settings_manage_space_message">This space has %1$s.\n\nClear removes all the files but keeps the space. Delete removes the space and everything in it. Neither can be undone.</string>
+    <string name="button_clear">Clear</string>
+
+    <!-- Remove-domain dialog (swipe on a domain) -->
+    <string name="delete_domain_title">Remove domain</string>
+    <string name="delete_domain_message">Remove \"%1$s\" from your allowed domains? Files that load content from it may stop working correctly.</string>
+
+    <!-- Errors -->
+    <string name="error_load_spaces_failed">Couldn\'t load your spaces. Try again.</string>
+    <string name="error_load_domains_failed">Couldn\'t load your allowed domains. Try again.</string>
+    <string name="error_clear_space_failed">Couldn\'t clear that space. Try again.</string>
+    <string name="error_delete_space_failed">Couldn\'t delete that space. Try again.</string>
+    <string name="error_remove_domain_failed">Couldn\'t remove that domain. Try again.</string>
+
+    <!-- Space HTML count, reused in both the row and the manage dialog -->
+    <plurals name="space_html_count">
+        <item quantity="one">%d file</item>
+        <item quantity="other">%d files</item>
+    </plurals>
 
 </resources>

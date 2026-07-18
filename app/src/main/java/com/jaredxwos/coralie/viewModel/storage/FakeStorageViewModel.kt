@@ -1,8 +1,9 @@
 package com.jaredxwos.coralie.viewModel.storage
 
 import android.net.Uri
-import com.jaredxwos.coralie.ui.composable.component.fileRow.FileRowConfig
-import com.jaredxwos.coralie.ui.composable.component.spaceRow.SpaceRowConfig
+import com.jaredxwos.coralie.ui.composable.component.rows.fileRow.FileRowConfig
+import com.jaredxwos.coralie.ui.composable.component.rows.spaceRow.SpaceRowConfig
+import com.jaredxwos.coralie.ui.composable.component.rows.spaceUsageRow.SpaceUsage
 
 /**
  * In-memory [StorageViewModel] for @Preview and tests. No AppStorage dependency.
@@ -99,22 +100,15 @@ class FakeStorageViewModel : StorageViewModel {
         return Result.success(Unit)
     }
 
-    // --- No-ops below: not wired to any UI action yet (§7 Open items). ---
+    override suspend fun retrieveAllSpaceUsage(): Result<List<SpaceUsage>> {
+        return Result.success(emptyList())
+    }
 
-    override suspend fun renameFile(assetId: Long, name: String): Result<Unit> {
+    override suspend fun clearSpace(spaceId: Long): Result<Unit> {
         return Result.success(Unit)
     }
 
-    override suspend fun renameSpace(spaceId: Long, name: String): Result<Unit> {
-        return Result.success(Unit)
-    }
-
-    override suspend fun changeFileUri(assetId: Long, uri: Uri): Result<Unit> {
-        return Result.success(Unit)
-    }
-
-    override suspend fun removeSpace(spaceId: Long): Result<Unit> {
-        // no-op
+    override suspend fun deleteSpace(spaceId: Long): Result<Unit> {
         return Result.success(Unit)
     }
 }

@@ -1,4 +1,4 @@
-package com.jaredxwos.coralie.ui.composable.component.spaceRow
+package com.jaredxwos.coralie.ui.composable.component.rows.spaceRow
 
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateDpAsState
