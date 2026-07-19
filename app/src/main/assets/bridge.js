@@ -28,7 +28,7 @@
       // Preserves the resolve/reject function so that this bridge.js can resolve/reject later on
       pending.set(id, { resolve, reject });
       // Actually send the callback request to kotlin
-      window.nativeBridge.postMessage(JSON.stringify({ id, callback, params }));
+      window.Coralie.postMessage(JSON.stringify({ id, callback, params }));
     });
   }
 
@@ -53,7 +53,7 @@
 
 
   // When Kotlin responds (Kotlin only messages in response to a callback request in current design)
-  window.nativeBridge.onmessage = function (event) {
+  window.Coralie.onmessage = function (event) {
     const response = parseResponse(event.data);
 
     // Check if response fits JSON schema
@@ -86,5 +86,5 @@
     }
   };
 
-  window.NativeBridge = { call, onEvent: null };
+  window.Coralie = { call, onEvent: null };
 })();
