@@ -19,6 +19,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
@@ -41,7 +43,7 @@ import java.util.concurrent.CopyOnWriteArrayList
  * PeerLink.send() on it directly with arbitrary bytes.
  */
 @RunWith(AndroidJUnit4::class)
-class LiveConnectionManagerMalformedFrameTest {
+class MalformedFrameTest {
 
     private val pubkeyB = "pubkey-b"
     private val pubkeyC = "pubkey-c"
@@ -87,7 +89,15 @@ class LiveConnectionManagerMalformedFrameTest {
 
         val answerMsg = withTimeoutOrNull(15_000.milliseconds) { signallingC.inbound.receive() }
         assertNotNull("C never received an answer from B", answerMsg)
-        val answer = Json.decodeFromString<SessionDescriptionData>(answerMsg!!.plaintext)
+        val encodedAnswer = answerMsg!!.plaintext
+        val encodedType = Json.parseToJsonElement(encodedAnswer)
+            .jsonObject
+            .getValue("type")
+            .jsonPrimitive
+            .content
+        assertEquals("answer", encodedType)
+
+        val answer = Json.decodeFromString<SessionDescriptionData>(encodedAnswer)
         assertEquals(SdpType.ANSWER, answer.type)
         initiatorC.acceptAnswer(answer)
 

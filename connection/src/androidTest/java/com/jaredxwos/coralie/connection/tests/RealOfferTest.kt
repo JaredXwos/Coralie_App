@@ -11,6 +11,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
@@ -67,7 +69,15 @@ class RealOfferTest {
         }
         assertNotNull("expected an Offer to peerPubkeyHex within the timeout", sentOffer)
 
-        val decoded = Json.decodeFromString<SessionDescriptionData>(sentOffer!!.second)
+        val encodedOffer = sentOffer!!.second
+        val encodedType = Json.parseToJsonElement(encodedOffer)
+            .jsonObject
+            .getValue("type")
+            .jsonPrimitive
+            .content
+        assertEquals("offer", encodedType)
+
+        val decoded = Json.decodeFromString<SessionDescriptionData>(encodedOffer)
         assertEquals(SdpType.OFFER, decoded.type)
         assertTrue(decoded.sdp.isNotBlank())
 

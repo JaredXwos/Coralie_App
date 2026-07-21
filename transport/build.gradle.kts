@@ -22,6 +22,7 @@ android {
 }
 
 dependencies {
+    implementation(libs.androidx.junit.ktx)
     implementation(libs.webrtc)
     implementation(libs.androidx.appcompat)
     implementation(libs.androidx.core.ktx)

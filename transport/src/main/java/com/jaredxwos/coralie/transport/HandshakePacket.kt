@@ -1,5 +1,6 @@
 package com.jaredxwos.coralie.transport
 
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 @Serializable
@@ -12,7 +13,13 @@ data class SessionDescriptionData(
 )
 
 @Serializable
-enum class SdpType { OFFER, ANSWER }
+enum class SdpType {
+    @SerialName("offer")
+    OFFER,
+
+    @SerialName("answer")
+    ANSWER,
+}
 
 @Serializable
 data class IceCandidateData(

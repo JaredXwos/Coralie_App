@@ -80,13 +80,16 @@ class LoopbackTest {
         assertTrue("A never saw B as connected", awaitTrue { pubkeyB in managerA.peers.value })
         assertTrue("B never saw A as connected", awaitTrue { pubkeyA in managerB.peers.value })
 
-        val bytesAtoB = "hello from A".encodeToByteArray()
+        // Include the full signed-byte boundary used by Kotlin ByteArray JSON.
+        // The browser sends 128..255 as -128..-1 and reconstructs them with
+        // `value & 0xff` after decoding.
+        val bytesAtoB = byteArrayOf(0, 1, 127, -128, -1)
         assertTrue(managerA.sendMessage(pubkeyB, bytesAtoB).isSuccess)
         assertTrue("B never received A's message", awaitTrue { receivedByB.isNotEmpty() })
         assertEquals(pubkeyA, receivedByB.first().fromPubkeyHex)
         assertTrue(bytesAtoB.contentEquals(receivedByB.first().bytes))
 
-        val bytesBtoA = "hello from B".encodeToByteArray()
+        val bytesBtoA = byteArrayOf(-1, -128, 127, 1, 0)
         assertTrue(managerB.sendMessage(pubkeyA, bytesBtoA).isSuccess)
         assertTrue("A never received B's reply", awaitTrue { receivedByA.isNotEmpty() })
         assertEquals(pubkeyB, receivedByA.first().fromPubkeyHex)
