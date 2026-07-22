@@ -264,6 +264,76 @@
     emitNativeEvent(type, data);
   }
 
+
+  function resolveLocalStorage() {
+    try {
+      const storage = window.localStorage;
+      if (!storage) return null;
+
+      const probeKey = "__coralie_storage_probe__";
+      storage.setItem(probeKey, "1");
+      storage.removeItem(probeKey);
+
+      return storage;
+    } catch {
+      return null;
+    }
+  }
+
+  let localStorageBackend = resolveLocalStorage();
+
+  const coralieStorage = Object.freeze({
+    async getItem(key) {
+      const normalizedKey = String(key);
+
+      if (localStorageBackend) {
+        try {
+          return localStorageBackend.getItem(normalizedKey);
+        } catch {
+          localStorageBackend = null;
+        }
+      }
+
+      const value = await call("retrieveValue", { name: normalizedKey });
+      return value === null || value === undefined ? null : String(value);
+    },
+
+    async setItem(key, value) {
+      const normalizedKey = String(key);
+      const normalizedValue = String(value);
+
+      if (localStorageBackend) {
+        try {
+          localStorageBackend.setItem(normalizedKey, normalizedValue);
+          return;
+        } catch {
+          localStorageBackend = null;
+        }
+      }
+
+      await call("updateValue", {
+        name: normalizedKey,
+        value: normalizedValue,
+        upsert: true,
+      });
+    },
+
+    async removeItem(key) {
+      const normalizedKey = String(key);
+
+      if (localStorageBackend) {
+        try {
+          localStorageBackend.removeItem(normalizedKey);
+          return;
+        } catch {
+          localStorageBackend = null;
+        }
+      }
+
+      await call("deleteValue", { name: normalizedKey });
+    },
+  });
+
   const nativeBridge = {
     call,
     onEvent: handleNativeEvent,
@@ -271,6 +341,8 @@
   };
 
   const coralie = {
+    storage: coralieStorage,
+
     async getPubkey() {
       const pubkeyHex = await call("getPubkey");
       assertPubkeyHex(pubkeyHex, "pubkeyHex");
