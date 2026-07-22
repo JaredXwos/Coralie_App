@@ -41,25 +41,23 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.webkit.WebViewAssetLoader
-import androidx.webkit.WebViewCompat
-import androidx.webkit.WebViewFeature
 import com.jaredxwos.coralie.R
 import com.jaredxwos.coralie.mesh.AppMesh
-import com.jaredxwos.coralie.bridge.dispatch
 import com.jaredxwos.coralie.bridge.AppProxy
+import com.jaredxwos.coralie.bridge.CoralieEventEmitter
+import com.jaredxwos.coralie.bridge.CoralieJavascriptInterface
 import com.jaredxwos.coralie.storage.AppStorage
 import com.jaredxwos.coralie.storage.AppStorage.internalPathFor
 import com.jaredxwos.coralie.timer.AppTimers
 import com.jaredxwos.coralie.ui.composable.component.SquareIconButton
 import com.jaredxwos.coralie.ui.composable.component.dialogs.AppDialog
 import com.jaredxwos.coralie.ui.composable.component.dialogs.ButtonConfig
-import kotlinx.coroutines.launch
-import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import java.io.File
 
 private fun WebSettings.applySecurityModifiers() {
     javaScriptEnabled = true
+    domStorageEnabled = true
     allowFileAccess = false
     allowContentAccess = false
     javaScriptCanOpenWindowsAutomatically = false
@@ -70,7 +68,6 @@ private const val SCHEME = "https"
 private const val HOST = "appassets.androidplatform.net"
 private const val ASSET_ORIGIN = "$SCHEME://$HOST"
 private fun Uri.isSafe(): Boolean = scheme == SCHEME && host == HOST
-private val allowedOriginRules = setOf(ASSET_ORIGIN)
 
 @Composable
 fun ViewerScreen(
@@ -169,16 +166,16 @@ fun ViewerScreen(
                     factory = { context ->
                         WebView(context).apply {
                             settings.applySecurityModifiers()
-                            // Shared by AppMesh and AppTimers — both just need "push this
-                            // (type, data) pair into the page's onEvent", the dispatch by
-                            // event name (peers/message/terminalFailure/timerFired) happens
-                            // entirely on the HTML side.
-                            val sendEvent: (String, JsonElement) -> Unit = { type, data ->
-                                evaluateJavascript(
-                                    "window.NativeBridge.onEvent && window.NativeBridge.onEvent(${Json.encodeToString(type)}, $data)",
-                                    null
-                                )
-                            }
+                            // `window.Coralie` is the native object itself. There is no
+                            // page-visible transport object and no bridge.js.
+                            addJavascriptInterface(
+                                CoralieJavascriptInterface(),
+                                "Coralie",
+                            )
+
+                            val eventEmitter = CoralieEventEmitter(this)
+                            val sendEvent: (String, JsonElement) -> Unit =
+                                eventEmitter::emit
                             AppMesh.attach(scope, sendEvent)
                             AppMesh.rebuild()
                             AppTimers.attach(scope, sendEvent)
@@ -206,16 +203,6 @@ fun ViewerScreen(
                                     Log.d("WebConsole", "${m.message()} -- line ${m.lineNumber()} of ${m.sourceId()}")
                                     return true
                                 }
-                            }
-
-                            if (WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER))
-                                WebViewCompat.addWebMessageListener(this, "nativeBridge", allowedOriginRules) { _, message, _, _, replyProxy ->
-                                    scope.launch { replyProxy.postMessage(Json.encodeToString(dispatch(message))) }
-                                }
-
-                            if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
-                                val bridgeJs = context.assets.open("bridge.js").bufferedReader().use { it.readText() }
-                                WebViewCompat.addDocumentStartJavaScript(this, bridgeJs, allowedOriginRules)
                             }
 
                             loadUrl("$ASSET_ORIGIN/cache/${assetId}.html")
