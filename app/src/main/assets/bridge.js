@@ -280,6 +280,11 @@
     }
   }
 
+  function isMissingStorageEntryError(error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return /no entry named ['"][^'"]+['"] in this scope/i.test(message);
+  }
+
   let localStorageBackend = resolveLocalStorage();
 
   const coralieStorage = Object.freeze({
@@ -294,8 +299,14 @@
         }
       }
 
-      const value = await call("retrieveValue", { name: normalizedKey });
-      return value === null || value === undefined ? null : String(value);
+      try {
+        const value = await call("retrieveValue", { name: normalizedKey });
+        return value === null || value === undefined ? null : String(value);
+      } catch (error) {
+        // Match localStorage.getItem(): a missing key is not an error.
+        if (isMissingStorageEntryError(error)) return null;
+        throw error;
+      }
     },
 
     async setItem(key, value) {
@@ -330,7 +341,12 @@
         }
       }
 
-      await call("deleteValue", { name: normalizedKey });
+      try {
+        await call("deleteValue", { name: normalizedKey });
+      } catch (error) {
+        // Match localStorage.removeItem(): deleting a missing key is a no-op.
+        if (!isMissingStorageEntryError(error)) throw error;
+      }
     },
   });
 
