@@ -62,11 +62,15 @@ object AppStorage {
 
     suspend fun openSpace(spaceId: Long): Result<Unit> =
         exceptionLogger { dao ->
-            if (current != null) {
-                throw IllegalStateException(
-                    "Cannot have multiple open spaces",
-                )
+            if (
+                currentSpaceId == spaceId &&
+                current != null
+            ) {
+                return@exceptionLogger
             }
+
+            current?.close()
+            current = null
             currentSpaceId = spaceId
             current = HtmlStorage(spaceId, dao)
         }
@@ -123,53 +127,80 @@ object AppStorage {
             }
         }
 
-    suspend fun updateHtml(
+    /**
+     * Replaces an existing HTML asset with a newly inserted row. The database
+     * delete+insert is transactional, so a failed insert restores the old row.
+     * The replacement receives a new asset ID.
+     */
+    suspend fun replaceHtml(
         assetId: Long,
         spaceId: Long,
         name: String,
         sourceUri: Uri,
         capabilities: PageCapabilities,
-    ): Result<Unit> =
+    ): Result<Long> =
         exceptionLogger { dao ->
             val existing =
                 dao.retrieveHtml(assetId)
-                    ?: throw NoSuchElementException(
-                        "No HTML asset with id $assetId",
-                    )
 
             val newUri = sourceUri.toString()
-            val uriChanged = existing.sourceUri != newUri
+            val uriChanged =
+                existing?.sourceUri != newUri
 
-            if (uriChanged) {
+            if (existing == null || uriChanged) {
                 PersistentUri.persist(sourceUri).getOrThrow()
             }
 
-            try {
-                dao.updateHtml(
-                    assetId = assetId,
-                    spaceId = spaceId,
-                    name = name,
-                    sourceUri = newUri,
-                    capabilityMask = capabilities.mask,
-                )
-            } catch (error: Exception) {
-                if (uriChanged && !dao.uriExists(newUri)) {
-                    PersistentUri.release(sourceUri)
+            val replacementId =
+                try {
+                    dao.replaceHtml(
+                        assetId = assetId,
+                        spaceId = spaceId,
+                        name = name,
+                        sourceUri = newUri,
+                        capabilityMask = capabilities.mask,
+                    )
+                } catch (error: Exception) {
+                    if (
+                        (existing == null || uriChanged) &&
+                        !dao.uriExists(newUri)
+                    ) {
+                        PersistentUri.release(sourceUri)
+                    }
+                    throw error
                 }
-                throw error
-            }
+
+            internalPathFor(assetId).delete()
 
             if (
+                existing != null &&
                 uriChanged &&
                 !dao.uriExists(existing.sourceUri)
             ) {
+                // The database replacement already committed. Failure to
+                // release an obsolete URI grant must not report the edit as
+                // failed after the new asset has been saved.
                 PersistentUri
                     .release(existing.sourceUri.toUri())
-                    .getOrThrow()
+                    .getOrNull()
             }
 
-            // Force the next open to refresh from the selected source.
-            internalPathFor(assetId).delete()
+            replacementId
+        }
+
+    suspend fun updateHtmlCapabilities(
+        assetId: Long,
+        capabilities: PageCapabilities,
+    ): Result<Unit> =
+        exceptionLogger { dao ->
+            dao.retrieveHtml(assetId)
+                ?: throw NoSuchElementException(
+                    "No HTML asset with id $assetId",
+                )
+            dao.updateHtmlCapabilities(
+                assetId = assetId,
+                capabilityMask = capabilities.mask,
+            )
         }
 
     suspend fun retrieveAllHtml(): Result<List<Html>> =

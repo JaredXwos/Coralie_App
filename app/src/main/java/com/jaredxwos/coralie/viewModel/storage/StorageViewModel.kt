@@ -25,6 +25,7 @@ interface StorageViewModel {
         capabilities: PageCapabilities,
     ): Result<Long>
 
+    /** Replaces the existing asset row and returns after the old row is removed. */
     suspend fun updateFileInExistingSpace(
         assetId: Long,
         spaceId: Long,
@@ -33,6 +34,7 @@ interface StorageViewModel {
         capabilities: PageCapabilities,
     ): Result<Unit>
 
+    /** Replaces the existing asset row inside a newly created space. */
     suspend fun updateFileInNewSpace(
         assetId: Long,
         spaceName: String,

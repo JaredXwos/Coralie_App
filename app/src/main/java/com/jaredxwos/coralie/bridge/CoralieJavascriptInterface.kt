@@ -3,13 +3,13 @@ package com.jaredxwos.coralie.bridge
 import android.os.SystemClock
 import android.util.Log
 import android.webkit.JavascriptInterface
-import com.jaredxwos.coralie.capability.PageCapabilities
 import com.jaredxwos.coralie.capability.PageCapability
 import com.jaredxwos.coralie.connection.manager.ConnectionManager
 import com.jaredxwos.coralie.mesh.AppMesh
 import com.jaredxwos.coralie.storage.AppStorage
 import com.jaredxwos.coralie.storage.HtmlStorage
 import com.jaredxwos.coralie.timer.AppTimers
+import com.jaredxwos.coralie.session.ViewerSession
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.SerializationException
@@ -40,7 +40,7 @@ import androidx.core.net.toUri
  * "Java exception was raised during method invocation" message.
  */
 class CoralieJavascriptInterface(
-    private val capabilities: PageCapabilities,
+    private val session: ViewerSession,
 ) {
 
     @JavascriptInterface
@@ -49,9 +49,38 @@ class CoralieJavascriptInterface(
     @JavascriptInterface
     fun hostKind(): String = "android-native"
 
-    /** Granted capability names, encoded as a JSON string array. */
+    /** Effective persisted + allow-once grants, encoded as a JSON array. */
     @JavascriptInterface
-    fun capabilitiesJson(): String = capabilities.toJson()
+    fun capabilitiesJson(): String =
+        session.capabilitiesJson()
+
+    @JavascriptInterface
+    fun hasCapability(capabilityName: String): Boolean =
+        PageCapability.fromWireName(capabilityName)
+            ?.let(session::hasCapability)
+            ?: false
+
+    /**
+     * Prompts the user when the capability is not already granted.
+     *
+     * Returns only after the user chooses Reject, Allow once, or Always allow.
+     * Call this from page code before invoking the protected operation.
+     */
+    @JavascriptInterface
+    fun requestCapability(capabilityName: String): Boolean =
+        loggedCall(
+            operation = "requestCapability",
+            details = "capability=${oneLine(capabilityName, 40)}",
+        ) {
+            val capability =
+                PageCapability.fromWireName(capabilityName)
+                    ?: throw IllegalArgumentException(
+                        "Unknown Coralie capability '$capabilityName'",
+                    )
+            runBlocking {
+                session.requestCapability(capability)
+            }
+        }
 
     @JavascriptInterface
     fun getPubkey(): String =
@@ -476,17 +505,21 @@ class CoralieJavascriptInterface(
         operation: String,
     ) {
         try {
-            capabilities.require(
+            session.requireCapability(
                 capability = capability,
                 operation = operation,
             )
+            runBlocking {
+                session.ensureCapabilityReady(capability)
+            }
         } catch (error: SecurityException) {
             Log.w(
                 TAG,
                 "capability.denied " +
+                    "session=${session.sessionId} " +
                     "operation=$operation " +
                     "required=${capability.wireName} " +
-                    "granted=${capabilities.toJson()}",
+                    "granted=${session.capabilitiesJson()}",
             )
             throw error
         }

@@ -19,6 +19,9 @@ interface AppDao {
     @Query("SELECT * FROM spaces")
     suspend fun retrieveAllSpaces(): List<Space>
 
+    @Query("UPDATE spaces SET name = :name WHERE spaceId = :spaceId")
+    suspend fun updateSpaceName(spaceId: Long, name: String)
+
     @Query("DELETE FROM spaces WHERE spaceId = :spaceId")
     suspend fun deleteSpace(spaceId: Long)
 
@@ -50,21 +53,35 @@ interface AppDao {
     @Query("SELECT EXISTS(SELECT 1 FROM html WHERE spaceId = :spaceId)")
     suspend fun isSpaceLinked(spaceId: Long): Boolean
 
-    @Query(
-        """
-        UPDATE html
-        SET spaceId = :spaceId,
-            name = :name,
-            sourceUri = :sourceUri,
-            capabilityMask = :capabilityMask
-        WHERE assetId = :assetId
-        """,
-    )
-    suspend fun updateHtml(
+    /**
+     * Atomically removes the existing row and inserts a replacement. If the
+     * insert fails, Room rolls the transaction back and keeps the old row.
+     */
+    @Transaction
+    suspend fun replaceHtml(
         assetId: Long,
         spaceId: Long,
         name: String,
         sourceUri: String,
+        capabilityMask: Long,
+    ): Long {
+        if (retrieveHtml(assetId) != null) {
+            deleteHtml(assetId)
+        }
+        return createHtml(
+            spaceId = spaceId,
+            name = name,
+            sourceUri = sourceUri,
+            capabilityMask = capabilityMask,
+        )
+    }
+
+    @Query(
+        "UPDATE html SET capabilityMask = :capabilityMask " +
+            "WHERE assetId = :assetId",
+    )
+    suspend fun updateHtmlCapabilities(
+        assetId: Long,
         capabilityMask: Long,
     )
 

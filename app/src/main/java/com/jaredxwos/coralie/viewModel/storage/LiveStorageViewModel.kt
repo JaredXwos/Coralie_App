@@ -139,13 +139,13 @@ object LiveStorageViewModel : StorageViewModel {
         uri: Uri,
         capabilities: PageCapabilities,
     ): Result<Unit> =
-        AppStorage.updateHtml(
+        AppStorage.replaceHtml(
             assetId = assetId,
             spaceId = spaceId,
             name = name.trim(),
             sourceUri = uri,
             capabilities = capabilities,
-        )
+        ).map { }
 
     override suspend fun updateFileInNewSpace(
         assetId: Long,
@@ -159,13 +159,13 @@ object LiveStorageViewModel : StorageViewModel {
                 .getOrElse { return Result.failure(it) }
 
         val result =
-            AppStorage.updateHtml(
+            AppStorage.replaceHtml(
                 assetId = assetId,
                 spaceId = spaceId,
                 name = name.trim(),
                 sourceUri = uri,
                 capabilities = capabilities,
-            )
+            ).map { }
 
         if (
             result.isFailure &&

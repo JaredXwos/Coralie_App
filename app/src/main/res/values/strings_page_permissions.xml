@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="capability_prompt_title">Allow page permission?</string>
+    <string name="capability_prompt_message">%1$s is requesting the %2$s permission.</string>
+    <string name="permission_reject">Reject</string>
+    <string name="permission_allow_once">Allow once</string>
+    <string name="permission_allow_always">Always allow</string>
+</resources>

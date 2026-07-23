@@ -48,19 +48,19 @@ import androidx.webkit.WebViewAssetLoader
 import com.jaredxwos.coralie.R
 import com.jaredxwos.coralie.capability.PageCapabilities
 import com.jaredxwos.coralie.capability.PageCapability
-import com.jaredxwos.coralie.mesh.AppMesh
+import com.jaredxwos.coralie.session.CapabilityDecision
+import com.jaredxwos.coralie.session.CapabilityPrompt
+import com.jaredxwos.coralie.session.ViewerSession
 import com.jaredxwos.coralie.bridge.AppProxy
-import com.jaredxwos.coralie.bridge.CoralieEventEmitter
 import com.jaredxwos.coralie.bridge.CoralieJavascriptInterface
 import com.jaredxwos.coralie.storage.AppStorage
 import com.jaredxwos.coralie.storage.AppStorage.internalPathFor
-import com.jaredxwos.coralie.timer.AppTimers
 import com.jaredxwos.coralie.ui.composable.component.SquareIconButton
 import com.jaredxwos.coralie.ui.composable.component.dialogs.AppDialog
 import com.jaredxwos.coralie.ui.composable.component.dialogs.ButtonConfig
-import kotlinx.serialization.json.JsonElement
 import java.io.File
 import java.util.concurrent.atomic.AtomicReference
+import kotlinx.coroutines.flow.MutableStateFlow
 
 private fun WebSettings.applySecurityModifiers() {
     javaScriptEnabled = true
@@ -100,11 +100,14 @@ fun ViewerScreen(
     var status by remember { mutableStateOf<LoadStatus>(LoadStatus.Preparing) }
     var showLeaveConfirmation by remember { mutableStateOf(false) }
     val activeHttpRequests by AppProxy.activeRequests.collectAsState()
-    val eventEmitterRef = remember {
-        AtomicReference<CoralieEventEmitter?>(null)
+    var viewerSession by remember {
+        mutableStateOf<ViewerSession?>(null)
     }
-    val activeCapabilitiesRef = remember {
-        AtomicReference(PageCapabilities.NONE)
+    val viewerSessionRef = remember {
+        AtomicReference<ViewerSession?>(null)
+    }
+    val emptyCapabilityPromptFlow = remember {
+        MutableStateFlow<CapabilityPrompt?>(null)
     }
 
     // Load the persisted page policy before starting any native subsystem.
@@ -135,37 +138,43 @@ fun ViewerScreen(
             )
         }
 
-        val capabilities =
-            PageCapabilities(html.capabilityMask)
-        activeCapabilitiesRef.set(capabilities)
+        val newSession =
+            ViewerSession(
+                assetId = assetId,
+                spaceId = html.spaceId,
+                initialCapabilities =
+                    PageCapabilities(html.capabilityMask),
+                parentScope = scope,
+            )
+
+        viewerSessionRef
+            .getAndSet(newSession)
+            ?.close()
+        viewerSession = newSession
+
+        try {
+            newSession.prepare()
+        } catch (error: Exception) {
+            Log.e(
+                "nav",
+                "session.prepare failed: ${error.message}",
+                error,
+            )
+            newSession.close()
+            viewerSessionRef.compareAndSet(newSession, null)
+            viewerSession = null
+            status = LoadStatus.Failed(
+                "Couldn't prepare page session: ${error.message}",
+            )
+            return@LaunchedEffect
+        }
 
         Log.i(
             WEBVIEW_TAG,
-            "capabilities.loaded assetId=$assetId " +
-                "mask=${capabilities.mask} " +
-                "granted=${capabilities.toJson()}",
+            "session.loaded assetId=$assetId " +
+                "session=${newSession.sessionId} " +
+                "granted=${newSession.capabilitiesJson()}",
         )
-
-        if (capabilities.allows(PageCapability.STORAGE)) {
-            AppStorage.openSpace(html.spaceId)
-                .onSuccess {
-                    Log.d(
-                        "nav",
-                        "space opened for storage capability",
-                    )
-                }
-                .onFailure {
-                    Log.e(
-                        "nav",
-                        "openSpace failed: ${it.message}",
-                        it,
-                    )
-                    status = LoadStatus.Failed(
-                        "Couldn't open space: ${it.message}",
-                    )
-                    return@LaunchedEffect
-                }
-        }
 
         AppStorage.cache(assetId)
             .onFailure {
@@ -183,28 +192,10 @@ fun ViewerScreen(
 
     DisposableEffect(Unit) {
         onDispose {
-            eventEmitterRef
+            viewerSessionRef
                 .getAndSet(null)
                 ?.close()
-
-            val capabilities =
-                activeCapabilitiesRef.getAndSet(
-                    PageCapabilities.NONE,
-                )
-
-            if (capabilities.allows(PageCapability.STORAGE)) {
-                AppStorage.closeSpaceSync()
-            }
-            if (capabilities.allows(PageCapability.MESH)) {
-                AppMesh.teardownForPageExit()
-            }
-            if (capabilities.allows(PageCapability.TIMERS)) {
-                AppTimers.teardownForPageExit()
-            }
-
-            // Always clear a pending prompt/request in case the page exits
-            // while HTTP permission is being resolved.
-            AppProxy.teardownForPageExit()
+            viewerSession = null
         }
     }
     BackHandler(onBack = { showLeaveConfirmation = true })
@@ -248,8 +239,8 @@ fun ViewerScreen(
         HorizontalDivider(color = MaterialTheme.colorScheme.onBackground, thickness = 2.dp)
 
         if (
-            activeCapabilitiesRef.get()
-                .allows(PageCapability.HTTP) &&
+            viewerSession
+                ?.hasCapability(PageCapability.HTTP) == true &&
             activeHttpRequests > 0
         ) {
             Column(
@@ -284,47 +275,25 @@ fun ViewerScreen(
                     factory = { context ->
                         WebView(context).apply {
                             settings.applySecurityModifiers()
-                            // `window.Coralie` is the native object itself. There is no
-                            // page-visible transport object and no bridge.js.
-                            val capabilities =
-                                activeCapabilitiesRef.get()
+                            // `window.Coralie` is the native object itself.
+                            val session =
+                                checkNotNull(viewerSessionRef.get()) {
+                                    "ViewerSession was not prepared"
+                                }
 
                             addJavascriptInterface(
-                                CoralieJavascriptInterface(
-                                    capabilities,
-                                ),
+                                CoralieJavascriptInterface(session),
                                 "Coralie",
                             )
+                            session.attachWebView(this)
 
                             Log.i(
                                 WEBVIEW_TAG,
-                                "capabilities.activate " +
+                                "session.activate " +
                                     "assetId=$assetId " +
-                                    "granted=${capabilities.toJson()}",
+                                    "session=${session.sessionId} " +
+                                    "granted=${session.capabilitiesJson()}",
                             )
-
-                            val eventEmitter = CoralieEventEmitter(this)
-                            eventEmitterRef
-                                .getAndSet(eventEmitter)
-                                ?.close()
-                            val sendEvent: (String, JsonElement) -> Unit =
-                                eventEmitter::emit
-                            if (
-                                capabilities.allows(
-                                    PageCapability.MESH,
-                                )
-                            ) {
-                                AppMesh.attach(scope, sendEvent)
-                                AppMesh.rebuild()
-                            }
-
-                            if (
-                                capabilities.allows(
-                                    PageCapability.TIMERS,
-                                )
-                            ) {
-                                AppTimers.attach(scope, sendEvent)
-                            }
 
                             val assetLoader = WebViewAssetLoader.Builder()
                                 .addPathHandler("/assets/", WebViewAssetLoader.AssetsPathHandler(context))
@@ -497,12 +466,88 @@ fun ViewerScreen(
         )
     }
 
+    val capabilityPromptFlow =
+        viewerSession?.permissionPrompt
+            ?: emptyCapabilityPromptFlow
+    val capabilityPrompt by capabilityPromptFlow.collectAsState()
+
+    capabilityPrompt?.let { prompt ->
+        val capabilityName =
+            when (prompt.capability) {
+                PageCapability.MESH ->
+                    stringResource(R.string.capability_mesh_title)
+                PageCapability.STORAGE ->
+                    stringResource(R.string.capability_storage_title)
+                PageCapability.HTTP ->
+                    stringResource(R.string.capability_http_title)
+                PageCapability.TIMERS ->
+                    stringResource(R.string.capability_timers_title)
+            }
+
+        AppDialog(
+            title =
+                stringResource(
+                    R.string.capability_prompt_title,
+                ),
+            message =
+                stringResource(
+                    R.string.capability_prompt_message,
+                    name,
+                    capabilityName,
+                ),
+            onDismiss = {
+                viewerSession?.resolveCapabilityPrompt(
+                    CapabilityDecision.REJECT,
+                )
+            },
+            isWarning = true,
+            buttons = listOf(
+                ButtonConfig(
+                    isWarning = false,
+                    text =
+                        stringResource(
+                            R.string.permission_reject,
+                        ),
+                    effect = {
+                        viewerSession?.resolveCapabilityPrompt(
+                            CapabilityDecision.REJECT,
+                        )
+                    },
+                ),
+                ButtonConfig(
+                    isWarning = false,
+                    text =
+                        stringResource(
+                            R.string.permission_allow_once,
+                        ),
+                    effect = {
+                        viewerSession?.resolveCapabilityPrompt(
+                            CapabilityDecision.ALLOW_ONCE,
+                        )
+                    },
+                ),
+                ButtonConfig(
+                    isWarning = true,
+                    text =
+                        stringResource(
+                            R.string.permission_allow_always,
+                        ),
+                    effect = {
+                        viewerSession?.resolveCapabilityPrompt(
+                            CapabilityDecision.ALLOW_ALWAYS,
+                        )
+                    },
+                ),
+            ),
+        )
+    }
+
     // --- Native-HTTP consent prompt: shown whenever AppProxy needs a decision
     // for a domain not already on the allowlist for this page/session. ---
     val permissionDomain by AppProxy.prompt.collectAsState()
     if (
-        activeCapabilitiesRef.get()
-            .allows(PageCapability.HTTP)
+        viewerSession
+            ?.hasCapability(PageCapability.HTTP) == true
     ) {
         permissionDomain?.let { domain ->
             AppDialog(

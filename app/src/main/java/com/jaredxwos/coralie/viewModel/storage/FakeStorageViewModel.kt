@@ -123,14 +123,6 @@ class FakeStorageViewModel : StorageViewModel {
         uri: Uri,
         capabilities: PageCapabilities,
     ): Result<Unit> {
-        val index = files.indexOfFirst { it.assetId == assetId }
-        if (index < 0) {
-            return Result.failure(
-                NoSuchElementException(
-                    "No HTML asset with id $assetId",
-                ),
-            )
-        }
         if (spaces.none { it.spaceId == spaceId }) {
             return Result.failure(
                 NoSuchElementException(
@@ -139,12 +131,16 @@ class FakeStorageViewModel : StorageViewModel {
             )
         }
 
-        files[index] = SeedFile(
-            assetId,
-            spaceId,
-            name.trim(),
-            uri,
-            capabilities.mask,
+        files.removeAll {
+            it.assetId == assetId
+        }
+
+        files += SeedFile(
+            assetId = nextAssetId++,
+            spaceId = spaceId,
+            name = name.trim(),
+            uri = uri,
+            capabilityMask = capabilities.mask,
         )
         return Result.success(Unit)
     }

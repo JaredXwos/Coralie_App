@@ -311,6 +311,9 @@ fun AddFileScreen(
                                     capabilities = capabilities,
                                 ).map { Unit }
                             } else {
+                                // Editing is replacement semantics: the live
+                                // model atomically deletes the existing row and
+                                // inserts the submitted file as a new asset.
                                 viewModel.updateFileInExistingSpace(
                                     assetId = editingAssetId,
                                     spaceId = selection.spaceId,

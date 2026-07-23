@@ -5,24 +5,34 @@ enum class PageCapability(
     val bit: Long,
     val wireName: String,
 ) {
-    MESH(1L, "mesh"),
-    STORAGE(2L, "storage"),
-    HTTP(4L, "http"),
-    TIMERS(8L, "timers"),
+    MESH(1L shl 0, "mesh"),
+    STORAGE(1L shl 1, "storage"),
+    HTTP(1L shl 2, "http"),
+    TIMERS(1L shl 3, "timers");
+
+    companion object {
+        fun fromWireName(value: String): PageCapability? =
+            entries.firstOrNull {
+                it.wireName.equals(value.trim(), ignoreCase = true)
+            }
+    }
 }
 
 /**
- * Immutable capability policy attached to one HTML asset.
- *
- * Unknown future bits are preserved in [mask] but ignored by the current app.
- * This makes database rows forwards-compatible while keeping enforcement
- * limited to capabilities understood by this build.
+ * Immutable capability set. Unknown future bits are preserved in [mask], while
+ * this build only enforces entries present in [PageCapability].
  */
 data class PageCapabilities(
     val mask: Long,
 ) {
     fun allows(capability: PageCapability): Boolean =
         mask and capability.bit != 0L
+
+    fun with(capability: PageCapability): PageCapabilities =
+        PageCapabilities(mask or capability.bit)
+
+    fun without(capability: PageCapability): PageCapabilities =
+        PageCapabilities(mask and capability.bit.inv())
 
     fun require(
         capability: PageCapability,
