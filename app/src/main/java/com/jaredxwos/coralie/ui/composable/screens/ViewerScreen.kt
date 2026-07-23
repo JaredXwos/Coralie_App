@@ -26,6 +26,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -39,6 +40,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -95,6 +97,7 @@ fun ViewerScreen(
     val scope = rememberCoroutineScope()
     var status by remember { mutableStateOf<LoadStatus>(LoadStatus.Preparing) }
     var showLeaveConfirmation by remember { mutableStateOf(false) }
+    val activeHttpRequests by AppProxy.activeRequests.collectAsState()
     val eventEmitterRef = remember {
         AtomicReference<CoralieEventEmitter?>(null)
     }
@@ -170,6 +173,24 @@ fun ViewerScreen(
             }
         }
         HorizontalDivider(color = MaterialTheme.colorScheme.onBackground, thickness = 2.dp)
+
+        if (activeHttpRequests > 0) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(MaterialTheme.colorScheme.surfaceVariant),
+            ) {
+                LinearProgressIndicator(
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Text(
+                    text = stringResource(R.string.loading_page_data),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                )
+            }
+        }
 
         // --- Body: existing per-state rendering, now living below the bar instead of replacing it. ---
         Box(modifier = Modifier.fillMaxSize()) {

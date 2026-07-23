@@ -9,9 +9,7 @@ import com.jaredxwos.coralie.storage.AppStorage
 import com.jaredxwos.coralie.storage.HtmlStorage
 import com.jaredxwos.coralie.timer.AppTimers
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonNull
@@ -237,11 +235,11 @@ class CoralieJavascriptInterface {
 
             stage = "native-proxy"
             val response = runBlocking {
-                // The proxy may show the allow/deny dialog, so it must enter
-                // through Main. Its suspend network work can then leave Main.
-                withContext(Dispatchers.Main.immediate) {
-                    proxyHttpRequest(params)
-                }
+                // @JavascriptInterface methods already run off the Android UI
+                // thread. AppProxy uses thread-safe StateFlow for permission
+                // prompts and Dispatchers.IO for the network request, so moving
+                // the whole operation onto Main would freeze Compose/WebView UI.
+                proxyHttpRequest(params)
             }
 
             stage = "validate-response"

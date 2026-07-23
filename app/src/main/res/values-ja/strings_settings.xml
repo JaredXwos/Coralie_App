@@ -1,0 +1,18 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="settings_title">設定</string>
+    <string name="header_allowed_domains">許可されたドメイン</string>
+    <string name="settings_no_domains">現時点では外部ドメインは許可されていません。許可されたドメインは、ファイル内のコンテンツを読み込むことができます。</string>
+    <string name="settings_manage_space_title">\"%1$s\"を編集</string>
+    <string name="settings_manage_space_message">スペースには%1$s.\n\nクレアはスペースを保持したまま、すべてのファイルを削除します。デリートはフィアルとスペースの両方を削除します。どちらの操作も元に戻すことはできません。</string>
+    <string name="delete_domain_title">ドメインの許可を取り消す</string>
+    <string name="delete_domain_message">許可リストから\"%1$s\"を削除しますか？ そのドメインからコンテンツを読み込むファイルは正しく動作しない場合があります。</string>
+    <string name="error_load_spaces_failed">スペースの読み込みに失敗しました</string>
+    <string name="error_load_domains_failed">ドメイン名の読み込みに失敗しました</string>
+    <string name="error_clear_space_failed">スペースのクレアに失敗しました.</string>
+    <string name="error_delete_space_failed">スペースのデリートに失敗しました</string>
+    <string name="error_remove_domain_failed">ドメインの許可の取り消すに失敗しました</string>
+    <plurals name="space_html_count">
+        <item quantity="other">%dつのファイル</item>
+    </plurals>
+</resources>

@@ -1,0 +1,15 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="header_file">ファイル</string>
+    <string name="header_space">スペース</string>
+    <string name="empty_files_title">ファイルは追加されていません</string>
+    <string name="empty_files_subtitle">「+」ボタンをタップすると追加できます</string>
+    <string name="delete_file_title">ファイル削除</string>
+    <string name="delete_file_message">\"%1$s\"の削除してもよろしいでしょうか。元に戻せません。</string>
+    <string name="warning_dialog_title">注意!</string>
+    <string name="error_load_files_failed">ファイルの読み込みに失敗しました</string>
+    <string name="error_delete_file_failed">ファイルの削除に失敗しました</string>
+    <plurals name="files_saved_count">
+        <item quantity="other">%d件のファイルを保存しました</item>
+    </plurals>
+</resources>

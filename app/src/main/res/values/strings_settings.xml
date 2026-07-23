@@ -1,0 +1,19 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="settings_title">Settings</string>
+    <string name="header_allowed_domains">ALLOWED DOMAINS</string>
+    <string name="settings_no_domains">No domains allowed yet. Allowed domains can load content inside your files.</string>
+    <string name="settings_manage_space_title">Manage \"%1$s\"</string>
+    <string name="settings_manage_space_message">This space has %1$s.\n\nClear removes all the files but keeps the space. Delete removes the space and everything in it. Neither can be undone.</string>
+    <string name="delete_domain_title">Remove domain</string>
+    <string name="delete_domain_message">Remove \"%1$s\" from your allowed domains? Files that load content from it may stop working correctly.</string>
+    <string name="error_load_spaces_failed">Couldn\'t load your spaces. Try again.</string>
+    <string name="error_load_domains_failed">Couldn\'t load your allowed domains. Try again.</string>
+    <string name="error_clear_space_failed">Couldn\'t clear that space. Try again.</string>
+    <string name="error_delete_space_failed">Couldn\'t delete that space. Try again.</string>
+    <string name="error_remove_domain_failed">Couldn\'t remove that domain. Try again.</string>
+    <plurals name="space_html_count">
+        <item quantity="one">%d file</item>
+        <item quantity="other">%d files</item>
+    </plurals>
+</resources>

@@ -193,6 +193,11 @@ fun HomeScreen(
                             viewModel.removeFile(file.assetId)
                                 .onSuccess {
                                     pendingDelete = null
+                                    // Remove immediately so the row cannot remain visible
+                                    // while the authoritative database reload is running.
+                                    files = files.filterNot {
+                                        it.assetId == file.assetId
+                                    }
                                     refreshKey++
                                 }
                                 .onFailure {

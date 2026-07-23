@@ -1,0 +1,8 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="error_open_space_failed">Couldn\'t open space: %1$s</string>
+    <string name="error_load_html_failed">Couldn\'t load html: %1$s</string>
+    <string name="leave_page_title">Leave %1$s?</string>
+    <string name="leave_page_message">You\'ll disconnect from this page and return to the home screen. You can come back anytime — nothing will be deleted.</string>
+    <string name="loading_page_data">Loading page data…</string>
+</resources>

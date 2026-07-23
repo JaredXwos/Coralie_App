@@ -1,0 +1,15 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="add_file_title">Add New File</string>
+    <string name="label_name">Name</string>
+    <string name="placeholder_file_name">Type the file name…</string>
+    <string name="label_html_file">HTML File</string>
+    <string name="open_file_picker">Tap to pick an HTML file…</string>
+    <string name="label_space">Space</string>
+    <string name="placeholder_new_space">Type a new space name…</string>
+    <string name="error_dialog_title">Couldn\'t add file</string>
+    <string name="error_save_file_failed">Failed to save file.</string>
+    <string name="error_missing_file_name">Please enter a file name.</string>
+    <string name="error_missing_file">Please pick an HTML file.</string>
+    <string name="error_missing_space">Please pick a space or type a new one.</string>
+</resources>

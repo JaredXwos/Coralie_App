@@ -25,6 +25,7 @@ import java.net.InetAddress
 import java.net.UnknownHostException
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 
 @Serializable
 data class HttpRequestParams(
@@ -54,10 +55,15 @@ suspend fun proxyHttpRequest(params: JsonElement): JsonElement {
     if (url.scheme != "https")
         throw IllegalArgumentException("Only https requests are allowed")
 
-    if (!AppProxy.authorize(url.host))
-        throw IllegalStateException("Request to ${url.host} was rejected")
+    AppProxy.requestStarted()
+    return try {
+        if (!AppProxy.authorize(url.host))
+            throw IllegalStateException("Request to ${url.host} was rejected")
 
-    return Json.encodeToJsonElement(AppProxy.perform(req, url))
+        Json.encodeToJsonElement(AppProxy.perform(req, url))
+    } finally {
+        AppProxy.requestFinished()
+    }
 }
 
 object AppProxy {
@@ -91,8 +97,22 @@ object AppProxy {
     private var pending: CompletableDeferred<Decision>? = null
 
     private val _prompt = MutableStateFlow<String?>(null)
+    private val activeRequestCounter = AtomicInteger(0)
+    private val _activeRequests = MutableStateFlow(0)
 
     val prompt: StateFlow<String?> = _prompt.asStateFlow()
+    val activeRequests: StateFlow<Int> = _activeRequests.asStateFlow()
+
+    internal fun requestStarted() {
+        _activeRequests.value = activeRequestCounter.incrementAndGet()
+    }
+
+    internal fun requestFinished() {
+        val remaining = activeRequestCounter.updateAndGet { current ->
+            (current - 1).coerceAtLeast(0)
+        }
+        _activeRequests.value = remaining
+    }
 
     /** Called by the UI when the user taps a dialog button. */
     fun resolvePrompt(decision: Decision) { pending?.complete(decision) }

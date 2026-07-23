@@ -1,0 +1,16 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="header_file">File</string>
+    <string name="header_space">Space</string>
+    <string name="empty_files_title">No files</string>
+    <string name="empty_files_subtitle">Tap the + button to get started</string>
+    <string name="delete_file_title">Deleting File</string>
+    <string name="delete_file_message">Delete \"%1$s\"? This can\'t be undone.</string>
+    <string name="warning_dialog_title">Warning!</string>
+    <string name="error_load_files_failed">Couldn\'t load your files.</string>
+    <string name="error_delete_file_failed">Couldn\'t delete that file.</string>
+    <plurals name="files_saved_count">
+        <item quantity="one">%d file saved</item>
+        <item quantity="other">%d files saved</item>
+    </plurals>
+</resources>

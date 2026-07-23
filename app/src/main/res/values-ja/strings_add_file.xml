@@ -1,0 +1,15 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="add_file_title">ファイル追加</string>
+    <string name="label_name">ファイル名</string>
+    <string name="placeholder_file_name">ファイル名をつけてください</string>
+    <string name="label_html_file">HTMLファイル</string>
+    <string name="open_file_picker">HTMLファイルを選んでください</string>
+    <string name="label_space">スペース</string>
+    <string name="placeholder_new_space">スペース名をつけてください</string>
+    <string name="error_dialog_title">ファイルの追加に失敗しました</string>
+    <string name="error_save_file_failed">ファイルの保存に失敗しました</string>
+    <string name="error_missing_file_name">ファイル名が必要です</string>
+    <string name="error_missing_file">ファイルを選択してください</string>
+    <string name="error_missing_space">既存のスペースを選んでるか、新しいスペースに名をつけてください</string>
+</resources>
