@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="edit_file_title">ファイルを編集</string>
+    <string name="label_capabilities">ページの権限</string>
+    <string name="capabilities_help">このHTMLページに必要なネイティブ機能だけを許可してください。権限は後から変更できます。</string>
+
+    <string name="capability_mesh_title">ピア接続</string>
+    <string name="capability_mesh_description">Coralieの公開鍵、ピア接続、ピアツーピアのメッセージ送受信へのアクセスを許可します。</string>
+
+    <string name="capability_storage_title">スペースストレージ</string>
+    <string name="capability_storage_description">選択したスペース内で共有されるデータの読み書きをこのページに許可します。</string>
+
+    <string name="capability_http_title">ネットワーク通信</string>
+    <string name="capability_http_description">Coralie経由の外部HTTPリクエストを許可します。接続先ドメインの確認は引き続き表示されます。</string>
+
+    <string name="capability_timers_title">ネイティブタイマー</string>
+    <string name="capability_timers_description">ネイティブタイマーの作成、一覧表示、キャンセルをこのページに許可します。</string>
+</resources>

@@ -1,24 +1,16 @@
 package com.jaredxwos.coralie.storage.database
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.ForeignKey
 import androidx.room.Index
 import androidx.room.PrimaryKey
-
-// SCHEMA
-// ──────────────────────────────────────────────────────
-// Spaces   ( space_id PK AI NN, name NN )
-// Html     ( asset_id PK AI NN, name NN, space_id FK → Spaces.space_id NN, sourceUri NN, )
-// Data     ( space_id PK FK → Spaces.space_id NN, name PK NN, value NN, tag )
-// Uri      ( uri PK NN )
-// ──────────────────────────────────────────────────────
-// FK cascade: deleting a Space deletes its Html and Data rows
-// AI: Auto increment
+import com.jaredxwos.coralie.capability.PageCapabilities
 
 @Entity(tableName = "spaces")
 data class Space(
     @PrimaryKey(autoGenerate = true) val spaceId: Long = 0,
-    val name: String
+    val name: String,
 )
 
 @Entity(
@@ -27,15 +19,18 @@ data class Space(
         entity = Space::class,
         parentColumns = ["spaceId"],
         childColumns = ["spaceId"],
-        onDelete = ForeignKey.CASCADE
+        onDelete = ForeignKey.CASCADE,
     )],
-    indices = [Index("spaceId")]
+    indices = [Index("spaceId")],
 )
 data class Html(
     @PrimaryKey(autoGenerate = true) val assetId: Long = 0,
     val name: String,
     val spaceId: Long,
-    val sourceUri: String
+    val sourceUri: String,
+    /** Bit mask defined by [PageCapabilities]. */
+    @ColumnInfo(defaultValue = "0")
+    val capabilityMask: Long = PageCapabilities.NONE_MASK,
 )
 
 @Entity(
@@ -45,19 +40,21 @@ data class Html(
         entity = Space::class,
         parentColumns = ["spaceId"],
         childColumns = ["spaceId"],
-        onDelete = ForeignKey.CASCADE
+        onDelete = ForeignKey.CASCADE,
     )],
-    indices = [Index("spaceId")]
+    indices = [Index("spaceId")],
 )
 data class Entry(
     val spaceId: Long,
     val name: String,
     val value: String,
-    val tag: String?
+    val tag: String?,
 )
 
 @Entity(
     tableName = "domain",
-    primaryKeys = ["domainUri"]
+    primaryKeys = ["domainUri"],
 )
-data class UriEntry(val domainUri: String)
+data class UriEntry(
+    val domainUri: String,
+)

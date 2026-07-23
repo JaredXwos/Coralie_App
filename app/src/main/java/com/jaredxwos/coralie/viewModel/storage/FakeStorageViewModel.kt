@@ -1,24 +1,24 @@
 package com.jaredxwos.coralie.viewModel.storage
 
 import android.net.Uri
+import com.jaredxwos.coralie.capability.PageCapabilities
 import com.jaredxwos.coralie.ui.composable.component.rows.fileRow.FileRowConfig
 import com.jaredxwos.coralie.ui.composable.component.rows.spaceRow.SpaceRowConfig
 import com.jaredxwos.coralie.ui.composable.component.rows.spaceUsageRow.SpaceUsage
 
-/**
- * In-memory [StorageViewModel] for @Preview and tests. No AppStorage dependency.
- *
- * Keeps spaces and files as separate seed lists and performs the join itself
- * (§3.5-B) rather than pre-baking joined rows — that way a broken join shows up
- * against the fake during preview, same as it would against real storage.
- *
- * Not thread-safe (plain MutableList) — fine for single-threaded preview/test
- * use; don't share one instance across concurrent coroutines.
- */
 class FakeStorageViewModel : StorageViewModel {
+    private data class SeedSpace(
+        val spaceId: Long,
+        val name: String,
+    )
 
-    private data class SeedSpace(val spaceId: Long, val name: String)
-    private data class SeedFile(val assetId: Long, val spaceId: Long, val name: String)
+    private data class SeedFile(
+        val assetId: Long,
+        val spaceId: Long,
+        val name: String,
+        val uri: Uri,
+        val capabilityMask: Long,
+    )
 
     private var nextSpaceId = 100L
     private var nextAssetId = 1000L
@@ -30,40 +30,73 @@ class FakeStorageViewModel : StorageViewModel {
     )
 
     private val files = mutableListOf(
-        SeedFile(1L, 1L, "Banana Bread.html"),
-        SeedFile(2L, 1L, "Curry Night.html"),
-        SeedFile(3L, 2L, "Sprint Retro.html"),
-        SeedFile(4L, 3L, "Japan Itinerary.html"),
-        SeedFile(5L, 3L, "Packing List.html"),
+        SeedFile(
+            1L,
+            1L,
+            "Banana Bread.html",
+            Uri.EMPTY,
+            PageCapabilities.NONE_MASK,
+        ),
+        SeedFile(
+            2L,
+            2L,
+            "Sprint Retro.html",
+            Uri.EMPTY,
+            PageCapabilities.NONE_MASK,
+        ),
     )
 
     override suspend fun retrieveAllFileConfig(): Result<List<FileRowConfig>> {
         val nameById = spaces.associate { it.spaceId to it.name }
         return Result.success(
-            files.map { f ->
+            files.map { file ->
                 FileRowConfig(
-                    assetId = f.assetId,
-                    spaceId = f.spaceId,
-                    name = f.name,
-                    spaceName = nameById[f.spaceId] ?: "(unknown space)",
+                    assetId = file.assetId,
+                    spaceId = file.spaceId,
+                    name = file.name,
+                    spaceName =
+                        nameById[file.spaceId]
+                            ?: "(unknown space)",
+                    capabilityMask = file.capabilityMask,
                 )
             },
         )
     }
 
     override suspend fun retrieveAllSpaceConfig(): Result<List<SpaceRowConfig>> =
-        Result.success(spaces.map { SpaceRowConfig(spaceId = it.spaceId, name = it.name) })
+        Result.success(
+            spaces.map {
+                SpaceRowConfig(
+                    spaceId = it.spaceId,
+                    name = it.name,
+                )
+            },
+        )
 
     override suspend fun saveNewFileToExistingSpace(
         spaceId: Long,
         name: String,
         uri: Uri,
+        capabilities: PageCapabilities,
     ): Result<Long> {
         if (spaces.none { it.spaceId == spaceId }) {
-            return Result.failure(IllegalArgumentException("No such space: $spaceId"))
+            return Result.failure(
+                IllegalArgumentException(
+                    "No such space: $spaceId",
+                ),
+            )
         }
+
         val assetId = nextAssetId++
-        files.add(SeedFile(assetId, spaceId, name.trim()))
+        files.add(
+            SeedFile(
+                assetId,
+                spaceId,
+                name.trim(),
+                uri,
+                capabilities.mask,
+            ),
+        )
         return Result.success(assetId)
     }
 
@@ -71,12 +104,67 @@ class FakeStorageViewModel : StorageViewModel {
         spaceName: String,
         name: String,
         uri: Uri,
+        capabilities: PageCapabilities,
     ): Result<Long> {
         val spaceId = nextSpaceId++
         spaces.add(SeedSpace(spaceId, spaceName.trim()))
-        val assetId = nextAssetId++
-        files.add(SeedFile(assetId, spaceId, name.trim()))
-        return Result.success(assetId)
+        return saveNewFileToExistingSpace(
+            spaceId,
+            name,
+            uri,
+            capabilities,
+        )
+    }
+
+    override suspend fun updateFileInExistingSpace(
+        assetId: Long,
+        spaceId: Long,
+        name: String,
+        uri: Uri,
+        capabilities: PageCapabilities,
+    ): Result<Unit> {
+        val index = files.indexOfFirst { it.assetId == assetId }
+        if (index < 0) {
+            return Result.failure(
+                NoSuchElementException(
+                    "No HTML asset with id $assetId",
+                ),
+            )
+        }
+        if (spaces.none { it.spaceId == spaceId }) {
+            return Result.failure(
+                NoSuchElementException(
+                    "No space with id $spaceId",
+                ),
+            )
+        }
+
+        files[index] = SeedFile(
+            assetId,
+            spaceId,
+            name.trim(),
+            uri,
+            capabilities.mask,
+        )
+        return Result.success(Unit)
+    }
+
+    override suspend fun updateFileInNewSpace(
+        assetId: Long,
+        spaceName: String,
+        name: String,
+        uri: Uri,
+        capabilities: PageCapabilities,
+    ): Result<Unit> {
+        val spaceId = nextSpaceId++
+        spaces.add(SeedSpace(spaceId, spaceName.trim()))
+        return updateFileInExistingSpace(
+            assetId,
+            spaceId,
+            name,
+            uri,
+            capabilities,
+        )
     }
 
     override suspend fun removeFile(assetId: Long): Result<Unit> {
@@ -84,31 +172,43 @@ class FakeStorageViewModel : StorageViewModel {
         return Result.success(Unit)
     }
 
-    override suspend fun retrieveFileUri(assetId: Long): Result<String> {
-        return Result.success("")
-    }
+    override suspend fun retrieveFileUri(assetId: Long): Result<String> =
+        files.firstOrNull { it.assetId == assetId }
+            ?.let { Result.success(it.uri.toString()) }
+            ?: Result.failure(
+                NoSuchElementException(
+                    "No HTML asset with id $assetId",
+                ),
+            )
 
-    override suspend fun retrieveAllAllowedDomains(): Result<List<String>> {
-        return Result.success(emptyList())
-    }
+    override suspend fun retrieveAllAllowedDomains(): Result<List<String>> =
+        Result.success(emptyList())
 
-    override suspend fun isDomainAllowed(domainUri: String): Result<Boolean> {
-        return Result.success(false)
-    }
+    override suspend fun isDomainAllowed(domainUri: String): Result<Boolean> =
+        Result.success(false)
 
-    override suspend fun disallowDomain(domainUri: String): Result<Unit> {
-        return Result.success(Unit)
-    }
+    override suspend fun disallowDomain(domainUri: String): Result<Unit> =
+        Result.success(Unit)
 
-    override suspend fun retrieveAllSpaceUsage(): Result<List<SpaceUsage>> {
-        return Result.success(emptyList())
-    }
+    override suspend fun retrieveAllSpaceUsage(): Result<List<SpaceUsage>> =
+        Result.success(
+            spaces.map { space ->
+                SpaceUsage(
+                    space.spaceId,
+                    space.name,
+                    files.count { it.spaceId == space.spaceId },
+                )
+            },
+        )
 
     override suspend fun clearSpace(spaceId: Long): Result<Unit> {
+        files.removeAll { it.spaceId == spaceId }
         return Result.success(Unit)
     }
 
     override suspend fun deleteSpace(spaceId: Long): Result<Unit> {
+        files.removeAll { it.spaceId == spaceId }
+        spaces.removeAll { it.spaceId == spaceId }
         return Result.success(Unit)
     }
 }

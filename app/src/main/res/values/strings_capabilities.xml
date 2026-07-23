@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="edit_file_title">Edit File</string>
+    <string name="label_capabilities">Page capabilities</string>
+    <string name="capabilities_help">Grant only the native features this HTML page needs. You can change these later.</string>
+
+    <string name="capability_mesh_title">Peer connections</string>
+    <string name="capability_mesh_description">Allow access to the Coralie public key, peer connections, and peer-to-peer messaging.</string>
+
+    <string name="capability_storage_title">Space storage</string>
+    <string name="capability_storage_description">Allow this page to read and write data shared within its selected space.</string>
+
+    <string name="capability_http_title">Network requests</string>
+    <string name="capability_http_description">Allow external HTTP requests through Coralie. Domain approval prompts still apply.</string>
+
+    <string name="capability_timers_title">Native timers</string>
+    <string name="capability_timers_description">Allow this page to create, list, and cancel native timers.</string>
+</resources>

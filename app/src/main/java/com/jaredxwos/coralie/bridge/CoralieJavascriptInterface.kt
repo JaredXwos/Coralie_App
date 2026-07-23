@@ -3,6 +3,8 @@ package com.jaredxwos.coralie.bridge
 import android.os.SystemClock
 import android.util.Log
 import android.webkit.JavascriptInterface
+import com.jaredxwos.coralie.capability.PageCapabilities
+import com.jaredxwos.coralie.capability.PageCapability
 import com.jaredxwos.coralie.connection.manager.ConnectionManager
 import com.jaredxwos.coralie.mesh.AppMesh
 import com.jaredxwos.coralie.storage.AppStorage
@@ -37,7 +39,9 @@ import androidx.core.net.toUri
  * WebView does not replace the useful Kotlin error with the generic
  * "Java exception was raised during method invocation" message.
  */
-class CoralieJavascriptInterface {
+class CoralieJavascriptInterface(
+    private val capabilities: PageCapabilities,
+) {
 
     @JavascriptInterface
     fun apiVersion(): Int = 2
@@ -45,9 +49,17 @@ class CoralieJavascriptInterface {
     @JavascriptInterface
     fun hostKind(): String = "android-native"
 
+    /** Granted capability names, encoded as a JSON string array. */
+    @JavascriptInterface
+    fun capabilitiesJson(): String = capabilities.toJson()
+
     @JavascriptInterface
     fun getPubkey(): String =
         loggedCall("getPubkey") {
+            requireCapability(
+                PageCapability.MESH,
+                "getPubkey",
+            )
             requireMesh().myPubkeyHex
         }
 
@@ -57,6 +69,10 @@ class CoralieJavascriptInterface {
             operation = "addPeer",
             details = "peer=${shortPubkey(pubkeyHex)}",
         ) {
+            requireCapability(
+                PageCapability.MESH,
+                "addPeer",
+            )
             requirePubkey(pubkeyHex, "pubkeyHex")
             requireMesh().addPeer(pubkeyHex.lowercase())
         }
@@ -72,6 +88,10 @@ class CoralieJavascriptInterface {
             operation = "sendMessage",
             details = "peer=${shortPubkey(toPubkeyHex)} payloadBytes=${payload.size}",
         ) {
+            requireCapability(
+                PageCapability.MESH,
+                "sendMessage",
+            )
             requirePubkey(toPubkeyHex, "toPubkeyHex")
 
             val bytes = ByteArray(payload.size) { index ->
@@ -94,6 +114,10 @@ class CoralieJavascriptInterface {
     @JavascriptInterface
     fun getPeersJson(): String =
         loggedCall("getPeersJson") {
+            requireCapability(
+                PageCapability.MESH,
+                "getPeersJson",
+            )
             buildJsonArray {
                 requireMesh().peers.value.forEach { pubkeyHex ->
                     add(buildJsonObject {
@@ -107,12 +131,20 @@ class CoralieJavascriptInterface {
     @JavascriptInterface
     fun reset(): String =
         loggedCall("reset") {
+            requireCapability(
+                PageCapability.MESH,
+                "reset",
+            )
             AppMesh.rebuild()
         }
 
     @JavascriptInterface
     fun close() {
         loggedCall("close") {
+            requireCapability(
+                PageCapability.MESH,
+                "close",
+            )
             AppMesh.teardownForPageExit()
         }
     }
@@ -129,6 +161,10 @@ class CoralieJavascriptInterface {
             operation = "storageGetItem",
             details = "key=${safeStorageKey(key)}",
         ) {
+            requireCapability(
+                PageCapability.STORAGE,
+                "storageGetItem",
+            )
             runBlocking {
                 val result = requireStorage().retrieveValue(key)
                 val error = result.exceptionOrNull()
@@ -146,6 +182,10 @@ class CoralieJavascriptInterface {
             operation = "storageSetItem",
             details = "key=${safeStorageKey(key)} valueChars=${value.length}",
         ) {
+            requireCapability(
+                PageCapability.STORAGE,
+                "storageSetItem",
+            )
             runBlocking {
                 requireStorage()
                     .updateValue(key, value, upsert = true)
@@ -160,6 +200,10 @@ class CoralieJavascriptInterface {
             operation = "storageRemoveItem",
             details = "key=${safeStorageKey(key)}",
         ) {
+            requireCapability(
+                PageCapability.STORAGE,
+                "storageRemoveItem",
+            )
             runBlocking {
                 val result = requireStorage().deleteItem(key)
                 val error = result.exceptionOrNull()
@@ -187,6 +231,13 @@ class CoralieJavascriptInterface {
         var requestBodyBytes = 0
 
         return try {
+            stage = "capability-check"
+            requireCapability(
+                PageCapability.HTTP,
+                "httpRequestJson",
+            )
+
+            stage = "parse-request"
             val params = Json.parseToJsonElement(requestJson)
             val requestObject = params.jsonObject
 
@@ -375,6 +426,10 @@ class CoralieJavascriptInterface {
                     "delaySeconds=$delaySeconds " +
                     "payloadChars=${payload?.length ?: 0}",
         ) {
+            requireCapability(
+                PageCapability.TIMERS,
+                "timerQueue",
+            )
             require(delaySeconds > 0) {
                 "delaySeconds must be positive"
             }
@@ -391,6 +446,10 @@ class CoralieJavascriptInterface {
             operation = "timerCancel",
             details = "id=${oneLine(id, 80)}",
         ) {
+            requireCapability(
+                PageCapability.TIMERS,
+                "timerCancel",
+            )
             AppTimers.cancel(id)
         }
     }
@@ -398,6 +457,10 @@ class CoralieJavascriptInterface {
     @JavascriptInterface
     fun timerListJson(): String =
         loggedCall("timerListJson") {
+            requireCapability(
+                PageCapability.TIMERS,
+                "timerListJson",
+            )
             buildJsonArray {
                 AppTimers.list().forEach { (id, remainingMs) ->
                     add(buildJsonObject {
@@ -407,6 +470,27 @@ class CoralieJavascriptInterface {
                 }
             }.toString()
         }
+
+    private fun requireCapability(
+        capability: PageCapability,
+        operation: String,
+    ) {
+        try {
+            capabilities.require(
+                capability = capability,
+                operation = operation,
+            )
+        } catch (error: SecurityException) {
+            Log.w(
+                TAG,
+                "capability.denied " +
+                    "operation=$operation " +
+                    "required=${capability.wireName} " +
+                    "granted=${capabilities.toJson()}",
+            )
+            throw error
+        }
+    }
 
     private fun requireMesh(): ConnectionManager =
         AppMesh.current
@@ -534,6 +618,13 @@ class CoralieJavascriptInterface {
                     "${it.javaClass.name} ${it.message.orEmpty()}"
                 }
                 .lowercase()
+
+        if (
+            "capability" in chainText &&
+            "not granted" in chainText
+        ) {
+            return "capability-denied"
+        }
 
         if (
             "rejected" in chainText ||

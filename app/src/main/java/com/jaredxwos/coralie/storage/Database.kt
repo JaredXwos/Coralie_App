@@ -10,33 +10,31 @@ import com.jaredxwos.coralie.storage.database.Html
 import com.jaredxwos.coralie.storage.database.Space
 import com.jaredxwos.coralie.storage.database.UriEntry
 
-// SCHEMA
-// ──────────────────────────────────────────────────────
-// Spaces  ( spaceId PK AI NN, name NN )
-// Html    ( spaceId PK FK→Spaces.spaceId NN, contentLink PK NN )
-// Store   ( spaceId PK FK→Spaces.spaceId NN, name PK NN, value NN, tag )
-// ──────────────────────────────────────────────────────
-// FK cascade: deleting a Space deletes its Html and Store rows
-// PK: primary key, AI: auto increment, FK: foreign key, NN: not null
-
 @Database(
     entities = [Space::class, Html::class, Entry::class, UriEntry::class],
-    version = 1,
-    exportSchema = false
+    version = 3,
+    exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun appDao(): AppDao
 
     companion object {
-        @Volatile private var instance: AppDatabase? = null
+        @Volatile
+        private var instance: AppDatabase? = null
 
         fun getInstance(context: Context): AppDatabase =
             instance ?: synchronized(this) {
                 instance ?: Room.databaseBuilder(
                     context.applicationContext,
                     AppDatabase::class.java,
-                    "app-db"
-                ).fallbackToDestructiveMigration(true).build().also { instance = it }
+                    "app-db",
+                )
+                    // Development-only policy. Because the app has not shipped,
+                    // schema changes reset local test data instead of maintaining
+                    // migration code for obsolete development schemas.
+                    .fallbackToDestructiveMigration(true)
+                    .build()
+                    .also { instance = it }
             }
     }
 }

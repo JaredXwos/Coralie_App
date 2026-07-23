@@ -1,22 +1,26 @@
 package com.jaredxwos.coralie.storage
 
 import android.net.Uri
+import androidx.core.net.toUri
+import com.jaredxwos.coralie.capability.PageCapabilities
 import com.jaredxwos.coralie.storage.database.AppDao
+import com.jaredxwos.coralie.storage.database.Html
 import com.jaredxwos.coralie.storage.database.Space
 import com.jaredxwos.coralie.utility.PersistentUri
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
-import kotlin.coroutines.cancellation.CancellationException
-import androidx.core.net.toUri
-import com.jaredxwos.coralie.storage.database.Html
 import java.io.File
 
 object AppStorage {
-    private val storageScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val storageScope =
+        CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
     private lateinit var dao: AppDao
     private lateinit var filesDir: File
+
     fun init(dao: AppDao, filesDir: File) {
         this.dao = dao
         this.filesDir = filesDir
@@ -24,108 +28,216 @@ object AppStorage {
 
     var current: HtmlStorage? = null
         private set
+
     private var currentSpaceId: Long? = null
-    fun internalPathFor(assetId: Long): File = File(filesDir, "html/$assetId.html")
-    private suspend fun <T> exceptionLogger(block: suspend (AppDao) -> T): Result<T> {
-        return try {
+
+    fun internalPathFor(assetId: Long): File =
+        File(filesDir, "html/$assetId.html")
+
+    private suspend fun <T> exceptionLogger(
+        block: suspend (AppDao) -> T,
+    ): Result<T> =
+        try {
             if (!::dao.isInitialized) {
-                throw IllegalStateException("AppStorage.init() was not called before use")
+                throw IllegalStateException(
+                    "AppStorage.init() was not called before use",
+                )
             }
             Result.success(block(dao))
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            Result.failure(e)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            Result.failure(error)
         }
-    }
 
-    fun closeSpaceSync() = storageScope.launch { closeSpace() }
-    suspend fun closeSpace(): Result<Unit> = exceptionLogger { dao ->
-        current?.close()
-        current = null
-        currentSpaceId = null
-    }
+    fun closeSpaceSync() =
+        storageScope.launch { closeSpace() }
 
-    suspend fun openSpace(spaceId: Long): Result<Unit> = exceptionLogger { dao ->
-        if (current!=null) throw IllegalStateException("Cannot have multiple open spaces")
-        currentSpaceId = spaceId
-        current = HtmlStorage(spaceId, dao)
-    }
-
-    suspend fun createSpace(name: String): Result<Long> = exceptionLogger { dao ->
-        dao.insertSpace(name)
-    }
-
-    suspend fun retrieveAllSpaces(): Result<List<Space>> = exceptionLogger { dao ->
-        dao.retrieveAllSpaces()
-    }
-
-    suspend fun updateSpaceName(spaceId: Long, name: String): Result<Unit> = exceptionLogger { dao ->
-        dao.updateSpaceName(spaceId, name)
-    }
-
-    suspend fun isSpaceLinked(spaceId: Long): Result<Boolean> = exceptionLogger { dao ->
-        dao.isSpaceLinked(spaceId)
-    }
-
-    suspend fun deleteSpace(spaceId: Long): Result<Unit> = exceptionLogger { dao ->
-        // If the space being deleted is the one currently active, close it
-        // Delete space fails silently if space does not exist
-        if (currentSpaceId == spaceId) closeSpace()
-        dao.deleteSpace(spaceId)
-    }
-
-    suspend fun addHtml(spaceId: Long, name: String, sourceUri: Uri): Result<Long> = exceptionLogger {
-        PersistentUri.persist(sourceUri).getOrThrow()
-        dao.createHtml(spaceId, name, sourceUri.toString())
-    }
-
-    suspend fun retrieveAllHtml(): Result<List<Html>> = exceptionLogger { dao ->
-        dao.retrieveAllHtml()
-    }
-
-    suspend fun cache(assetId: Long): Result<Unit> = exceptionLogger { dao ->
-        PersistentUri.retrieveFrom(
-            dao.retrieveUri(assetId).toUri(),
-            internalPathFor(assetId)).getOrThrow()
-    }
-
-    suspend fun retrieveSourceUri(assetId: Long): Result<String> = exceptionLogger { dao ->
-        dao.retrieveUri(assetId)
-    }
-
-    suspend fun removeHtml(assetId: Long): Result<Unit> = exceptionLogger { dao ->
-        val sourceUri = dao.retrieveUri(assetId)
-        dao.deleteHtml(assetId)
-        if (!dao.uriExists(sourceUri))
-            PersistentUri.release(sourceUri.toUri()).getOrThrow()
-    }
-
-    suspend fun clearSpace(spaceId: Long): Result<Unit> = exceptionLogger { dao ->
-        // Clearing the active space would leave the open HtmlStorage pointing at
-        // rows we're about to remove, so close it first — the Space itself stays.
-        if (currentSpaceId == spaceId) closeSpace()
-        val htmls = dao.retrieveAllHtml().filter { it.spaceId == spaceId }
-        for (html in htmls) {
-            dao.deleteHtml(html.assetId)
-            if (!dao.uriExists(html.sourceUri))
-                PersistentUri.release(html.sourceUri.toUri()).getOrThrow()
+    suspend fun closeSpace(): Result<Unit> =
+        exceptionLogger {
+            current?.close()
+            current = null
+            currentSpaceId = null
         }
-    }
 
-    suspend fun retrieveAllDomains(): Result<List<String>> = exceptionLogger { dao ->
-        dao.retrieveAllDomain()
-    }
+    suspend fun openSpace(spaceId: Long): Result<Unit> =
+        exceptionLogger { dao ->
+            if (current != null) {
+                throw IllegalStateException(
+                    "Cannot have multiple open spaces",
+                )
+            }
+            currentSpaceId = spaceId
+            current = HtmlStorage(spaceId, dao)
+        }
 
-    suspend fun allowDomain(domainUri: String): Result<Unit> = exceptionLogger { dao ->
-        dao.allowDomain(domainUri)
-    }
+    suspend fun createSpace(name: String): Result<Long> =
+        exceptionLogger { dao -> dao.insertSpace(name) }
 
-    suspend fun isDomainAllowed(domainUri: String): Result<Boolean> = exceptionLogger { dao ->
-        dao.domainAllowed(domainUri)
-    }
+    suspend fun retrieveAllSpaces(): Result<List<Space>> =
+        exceptionLogger { dao -> dao.retrieveAllSpaces() }
 
-    suspend fun disallowDomain(domainUri: String): Result<Unit> = exceptionLogger { dao ->
-        dao.disallowDomain(domainUri)
-    }
+    suspend fun isSpaceLinked(spaceId: Long): Result<Boolean> =
+        exceptionLogger { dao -> dao.isSpaceLinked(spaceId) }
+
+    suspend fun deleteSpace(spaceId: Long): Result<Unit> =
+        exceptionLogger { dao ->
+            if (currentSpaceId == spaceId) {
+                closeSpace().getOrThrow()
+            }
+            dao.deleteSpace(spaceId)
+        }
+
+    suspend fun addHtml(
+        spaceId: Long,
+        name: String,
+        sourceUri: Uri,
+    ): Result<Long> =
+        addHtml(
+            spaceId = spaceId,
+            name = name,
+            sourceUri = sourceUri,
+            capabilities = PageCapabilities.NONE,
+        )
+
+    suspend fun addHtml(
+        spaceId: Long,
+        name: String,
+        sourceUri: Uri,
+        capabilities: PageCapabilities,
+    ): Result<Long> =
+        exceptionLogger { dao ->
+            PersistentUri.persist(sourceUri).getOrThrow()
+            try {
+                dao.createHtml(
+                    spaceId = spaceId,
+                    name = name,
+                    sourceUri = sourceUri.toString(),
+                    capabilityMask = capabilities.mask,
+                )
+            } catch (error: Exception) {
+                if (!dao.uriExists(sourceUri.toString())) {
+                    PersistentUri.release(sourceUri)
+                }
+                throw error
+            }
+        }
+
+    suspend fun updateHtml(
+        assetId: Long,
+        spaceId: Long,
+        name: String,
+        sourceUri: Uri,
+        capabilities: PageCapabilities,
+    ): Result<Unit> =
+        exceptionLogger { dao ->
+            val existing =
+                dao.retrieveHtml(assetId)
+                    ?: throw NoSuchElementException(
+                        "No HTML asset with id $assetId",
+                    )
+
+            val newUri = sourceUri.toString()
+            val uriChanged = existing.sourceUri != newUri
+
+            if (uriChanged) {
+                PersistentUri.persist(sourceUri).getOrThrow()
+            }
+
+            try {
+                dao.updateHtml(
+                    assetId = assetId,
+                    spaceId = spaceId,
+                    name = name,
+                    sourceUri = newUri,
+                    capabilityMask = capabilities.mask,
+                )
+            } catch (error: Exception) {
+                if (uriChanged && !dao.uriExists(newUri)) {
+                    PersistentUri.release(sourceUri)
+                }
+                throw error
+            }
+
+            if (
+                uriChanged &&
+                !dao.uriExists(existing.sourceUri)
+            ) {
+                PersistentUri
+                    .release(existing.sourceUri.toUri())
+                    .getOrThrow()
+            }
+
+            // Force the next open to refresh from the selected source.
+            internalPathFor(assetId).delete()
+        }
+
+    suspend fun retrieveAllHtml(): Result<List<Html>> =
+        exceptionLogger { dao -> dao.retrieveAllHtml() }
+
+    suspend fun retrieveHtml(assetId: Long): Result<Html> =
+        exceptionLogger { dao ->
+            dao.retrieveHtml(assetId)
+                ?: throw NoSuchElementException(
+                    "No HTML asset with id $assetId",
+                )
+        }
+
+    suspend fun cache(assetId: Long): Result<Unit> =
+        exceptionLogger { dao ->
+            PersistentUri.retrieveFrom(
+                dao.retrieveUri(assetId).toUri(),
+                internalPathFor(assetId),
+            ).getOrThrow()
+        }
+
+    suspend fun retrieveSourceUri(assetId: Long): Result<String> =
+        exceptionLogger { dao -> dao.retrieveUri(assetId) }
+
+    suspend fun removeHtml(assetId: Long): Result<Unit> =
+        exceptionLogger { dao ->
+            val sourceUri = dao.retrieveUri(assetId)
+            dao.deleteHtml(assetId)
+            internalPathFor(assetId).delete()
+
+            if (!dao.uriExists(sourceUri)) {
+                PersistentUri
+                    .release(sourceUri.toUri())
+                    .getOrThrow()
+            }
+        }
+
+    suspend fun clearSpace(spaceId: Long): Result<Unit> =
+        exceptionLogger { dao ->
+            if (currentSpaceId == spaceId) {
+                closeSpace().getOrThrow()
+            }
+
+            val htmls =
+                dao.retrieveAllHtml()
+                    .filter { it.spaceId == spaceId }
+
+            for (html in htmls) {
+                dao.deleteHtml(html.assetId)
+                internalPathFor(html.assetId).delete()
+
+                if (!dao.uriExists(html.sourceUri)) {
+                    PersistentUri
+                        .release(html.sourceUri.toUri())
+                        .getOrThrow()
+                }
+            }
+        }
+
+    suspend fun retrieveAllDomains(): Result<List<String>> =
+        exceptionLogger { dao -> dao.retrieveAllDomain() }
+
+    suspend fun allowDomain(domainUri: String): Result<Unit> =
+        exceptionLogger { dao -> dao.allowDomain(domainUri) }
+
+    suspend fun isDomainAllowed(domainUri: String): Result<Boolean> =
+        exceptionLogger { dao -> dao.domainAllowed(domainUri) }
+
+    suspend fun disallowDomain(domainUri: String): Result<Unit> =
+        exceptionLogger { dao -> dao.disallowDomain(domainUri) }
 }
