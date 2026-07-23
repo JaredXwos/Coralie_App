@@ -1,0 +1,395 @@
+package com.jaredxwos.coralie.data.library
+
+import android.net.Uri
+import androidx.core.net.toUri
+import com.jaredxwos.coralie.data.library.model.PageCapabilities
+import com.jaredxwos.coralie.data.database.dao.LibraryDao
+import com.jaredxwos.coralie.data.database.entity.HtmlPageEntity
+import com.jaredxwos.coralie.data.library.model.PageDetails
+import com.jaredxwos.coralie.data.library.model.PageSummary
+import com.jaredxwos.coralie.data.library.model.SpaceSummary
+import com.jaredxwos.coralie.data.library.model.SpaceUsageSummary
+import java.io.File
+import kotlinx.coroutines.CancellationException
+
+class PageLibrary internal constructor(
+    private val dao: LibraryDao,
+    private val cache: PageCache,
+    private val uriStore: PersistentUriStore,
+) {
+    suspend fun getPage(
+        assetId: Long,
+    ): Result<PageDetails> =
+        resultOf {
+            dao.retrievePage(assetId)
+                ?.toDetails()
+                ?: throw NoSuchElementException(
+                    "No HTML asset with id $assetId",
+                )
+        }
+
+    suspend fun getPages():
+        Result<List<PageSummary>> =
+        resultOf {
+            val spaces =
+                dao.retrieveAllSpaces()
+                    .associateBy { space ->
+                        space.spaceId
+                    }
+
+            dao.retrieveAllPages()
+                .map { page ->
+                    PageSummary(
+                        assetId = page.assetId,
+                        spaceId = page.spaceId,
+                        name = page.name,
+                        spaceName =
+                            spaces[page.spaceId]
+                                ?.name
+                                .orEmpty(),
+                        capabilities =
+                            PageCapabilities(
+                                page.capabilityMask,
+                            ),
+                    )
+                }
+        }
+
+    suspend fun getSpaces():
+        Result<List<SpaceSummary>> =
+        resultOf {
+            dao.retrieveAllSpaces()
+                .map { space ->
+                    SpaceSummary(
+                        spaceId = space.spaceId,
+                        name = space.name,
+                    )
+                }
+        }
+
+    suspend fun getSpaceUsage():
+        Result<List<SpaceUsageSummary>> =
+        resultOf {
+            val pagesBySpace =
+                dao.retrieveAllPages()
+                    .groupingBy { page ->
+                        page.spaceId
+                    }
+                    .eachCount()
+
+            dao.retrieveAllSpaces()
+                .map { space ->
+                    SpaceUsageSummary(
+                        spaceId = space.spaceId,
+                        name = space.name,
+                        pageCount =
+                            pagesBySpace[space.spaceId]
+                                ?: 0,
+                    )
+                }
+        }
+
+    suspend fun importPage(
+        spaceId: Long,
+        name: String,
+        sourceUri: Uri,
+        capabilities: PageCapabilities,
+    ): Result<Long> =
+        resultOf {
+            importPageOrThrow(
+                spaceId = spaceId,
+                name = name,
+                sourceUri = sourceUri,
+                capabilities = capabilities,
+            )
+        }
+
+    suspend fun importPageIntoNewSpace(
+        spaceName: String,
+        pageName: String,
+        sourceUri: Uri,
+        capabilities: PageCapabilities,
+    ): Result<Long> =
+        resultOf {
+            val spaceId =
+                dao.insertSpace(spaceName.trim())
+
+            try {
+                importPageOrThrow(
+                    spaceId = spaceId,
+                    name = pageName,
+                    sourceUri = sourceUri,
+                    capabilities = capabilities,
+                )
+            } catch (error: Exception) {
+                if (!dao.spaceContainsPages(spaceId)) {
+                    dao.deleteSpace(spaceId)
+                }
+                throw error
+            }
+        }
+
+    suspend fun replacePage(
+        assetId: Long,
+        spaceId: Long,
+        name: String,
+        sourceUri: Uri,
+        capabilities: PageCapabilities,
+    ): Result<Long> =
+        resultOf {
+            replacePageOrThrow(
+                assetId = assetId,
+                spaceId = spaceId,
+                name = name,
+                sourceUri = sourceUri,
+                capabilities = capabilities,
+            )
+        }
+
+    suspend fun replacePageIntoNewSpace(
+        assetId: Long,
+        spaceName: String,
+        pageName: String,
+        sourceUri: Uri,
+        capabilities: PageCapabilities,
+    ): Result<Long> =
+        resultOf {
+            val spaceId =
+                dao.insertSpace(spaceName.trim())
+
+            try {
+                replacePageOrThrow(
+                    assetId = assetId,
+                    spaceId = spaceId,
+                    name = pageName,
+                    sourceUri = sourceUri,
+                    capabilities = capabilities,
+                )
+            } catch (error: Exception) {
+                if (!dao.spaceContainsPages(spaceId)) {
+                    dao.deleteSpace(spaceId)
+                }
+                throw error
+            }
+        }
+
+    suspend fun deletePage(
+        assetId: Long,
+    ): Result<Unit> =
+        resultOf {
+            val existing =
+                dao.retrievePage(assetId)
+                    ?: throw NoSuchElementException(
+                        "No HTML asset with id $assetId",
+                    )
+
+            dao.deletePage(assetId)
+            cache.delete(assetId)
+            releaseSourceIfUnused(existing.sourceUri)
+        }
+
+    suspend fun clearSpace(
+        spaceId: Long,
+    ): Result<Unit> =
+        resultOf {
+            val pages =
+                dao.retrievePagesInSpace(spaceId)
+
+            dao.deletePagesInSpace(spaceId)
+
+            pages.forEach { page ->
+                cache.delete(page.assetId)
+            }
+
+            for (
+                sourceUri in pages
+                    .map { page -> page.sourceUri }
+                    .distinct()
+            ) {
+                releaseSourceIfUnused(sourceUri)
+            }
+        }
+
+    suspend fun deleteSpace(
+        spaceId: Long,
+    ): Result<Unit> =
+        resultOf {
+            val pages =
+                dao.retrievePagesInSpace(spaceId)
+
+            dao.deleteSpace(spaceId)
+
+            pages.forEach { page ->
+                cache.delete(page.assetId)
+            }
+
+            for (
+                sourceUri in pages
+                    .map { page -> page.sourceUri }
+                    .distinct()
+            ) {
+                releaseSourceIfUnused(sourceUri)
+            }
+        }
+
+    suspend fun updatePageCapabilities(
+        assetId: Long,
+        capabilities: PageCapabilities,
+    ): Result<Unit> =
+        resultOf {
+            dao.retrievePage(assetId)
+                ?: throw NoSuchElementException(
+                    "No HTML asset with id $assetId",
+                )
+
+            dao.updatePageCapabilities(
+                assetId = assetId,
+                capabilityMask = capabilities.mask,
+            )
+        }
+
+    suspend fun ensureCached(
+        assetId: Long,
+    ): Result<File> {
+        val existing = cache.fileFor(assetId)
+        if (existing.isFile) {
+            return Result.success(existing)
+        }
+
+        return getPage(assetId)
+            .fold(
+                onSuccess = { page ->
+                    cache.copyFromUri(
+                        assetId = assetId,
+                        sourceUri = page.sourceUri,
+                    )
+                },
+                onFailure = {
+                    Result.failure(it)
+                },
+            )
+    }
+
+    private suspend fun importPageOrThrow(
+        spaceId: Long,
+        name: String,
+        sourceUri: Uri,
+        capabilities: PageCapabilities,
+    ): Long {
+        val normalizedName = name.trim()
+        require(normalizedName.isNotBlank()) {
+            "Page name must not be blank"
+        }
+
+        uriStore.persist(sourceUri).getOrThrow()
+
+        return try {
+            dao.createPage(
+                spaceId = spaceId,
+                name = normalizedName,
+                sourceUri = sourceUri.toString(),
+                capabilityMask = capabilities.mask,
+            )
+        } catch (error: Exception) {
+            if (
+                !dao.sourceUriExists(
+                    sourceUri.toString(),
+                )
+            ) {
+                uriStore.release(sourceUri)
+            }
+            throw error
+        }
+    }
+
+    private suspend fun replacePageOrThrow(
+        assetId: Long,
+        spaceId: Long,
+        name: String,
+        sourceUri: Uri,
+        capabilities: PageCapabilities,
+    ): Long {
+        val normalizedName = name.trim()
+        require(normalizedName.isNotBlank()) {
+            "Page name must not be blank"
+        }
+
+        val existing =
+            dao.retrievePage(assetId)
+        val newSource =
+            sourceUri.toString()
+        val sourceChanged =
+            existing?.sourceUri != newSource
+
+        if (existing == null || sourceChanged) {
+            uriStore.persist(sourceUri).getOrThrow()
+        }
+
+        val replacementId =
+            try {
+                dao.replacePage(
+                    assetId = assetId,
+                    spaceId = spaceId,
+                    name = normalizedName,
+                    sourceUri = newSource,
+                    capabilityMask = capabilities.mask,
+                )
+            } catch (error: Exception) {
+                if (
+                    (existing == null || sourceChanged) &&
+                    !dao.sourceUriExists(newSource)
+                ) {
+                    uriStore.release(sourceUri)
+                }
+                throw error
+            }
+
+        cache.delete(assetId)
+
+        if (
+            existing != null &&
+            sourceChanged
+        ) {
+            releaseSourceIfUnused(
+                existing.sourceUri,
+            )
+        }
+
+        return replacementId
+    }
+
+    private suspend fun releaseSourceIfUnused(
+        sourceUri: String,
+    ) {
+        if (!dao.sourceUriExists(sourceUri)) {
+            /*
+             * Database work has already committed. A stale external URI grant
+             * is preferable to reporting the completed operation as failed.
+             */
+            uriStore.release(sourceUri.toUri())
+                .getOrNull()
+        }
+    }
+
+    private fun HtmlPageEntity.toDetails():
+        PageDetails =
+        PageDetails(
+            assetId = assetId,
+            spaceId = spaceId,
+            name = name,
+            sourceUri = sourceUri.toUri(),
+            capabilities =
+                PageCapabilities(capabilityMask),
+        )
+
+    private suspend fun <T> resultOf(
+        block: suspend () -> T,
+    ): Result<T> =
+        try {
+            Result.success(block())
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            Result.failure(error)
+        }
+}
