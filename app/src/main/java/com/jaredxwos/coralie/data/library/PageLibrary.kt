@@ -248,15 +248,19 @@ class PageLibrary internal constructor(
             )
         }
 
-    suspend fun ensureCached(
+    /**
+     * Rebuilds the internal HTML copy from the page's current source URI.
+     *
+     * An existing cache file is deliberately not treated as authoritative.
+     * Returning it here would silently reopen an older page after the source
+     * document had been replaced or edited. [PageCache.copyFromUri] writes
+     * through a temporary file, so a failed refresh leaves the previous cache
+     * intact for diagnostics but does not return it as a successful load.
+     */
+    suspend fun refreshCached(
         assetId: Long,
-    ): Result<File> {
-        val existing = cache.fileFor(assetId)
-        if (existing.isFile) {
-            return Result.success(existing)
-        }
-
-        return getPage(assetId)
+    ): Result<File> =
+        getPage(assetId)
             .fold(
                 onSuccess = { page ->
                     cache.copyFromUri(
@@ -264,11 +268,10 @@ class PageLibrary internal constructor(
                         sourceUri = page.sourceUri,
                     )
                 },
-                onFailure = {
-                    Result.failure(it)
+                onFailure = { error ->
+                    Result.failure(error)
                 },
             )
-    }
 
     private suspend fun importPageOrThrow(
         spaceId: Long,

@@ -67,6 +67,10 @@ private fun WebSettings.applySecurityModifiers() {
         false
     setGeolocationEnabled(false)
     setSupportMultipleWindows(false)
+
+    // The source document is refreshed before every viewer session. Do not
+    // let WebView substitute a response retained from an earlier session.
+    cacheMode = WebSettings.LOAD_NO_CACHE
 }
 
 private const val SCHEME = "https"
@@ -600,9 +604,20 @@ private fun PageWebView(
                             page.assetId,
                     )
 
+                val pageRevision =
+                    cachedFile.lastModified()
+
+                Log.i(
+                    WEBVIEW_TAG,
+                    "page.loadFresh assetId=${page.assetId} " +
+                        "bytes=${cachedFile.length()} " +
+                        "revision=$pageRevision",
+                )
+
                 loadUrl(
                     "$ASSET_ORIGIN/cache/" +
-                        cachedFile.name,
+                        cachedFile.name +
+                        "?revision=$pageRevision",
                 )
 
                 layoutParams =

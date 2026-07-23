@@ -49,7 +49,7 @@ class ViewerViewModel(
 
             val cachedFile =
                 pageLibrary
-                    .ensureCached(assetId)
+                    .refreshCached(assetId)
                     .getOrElse { error ->
                         _uiState.value =
                             ViewerUiState
