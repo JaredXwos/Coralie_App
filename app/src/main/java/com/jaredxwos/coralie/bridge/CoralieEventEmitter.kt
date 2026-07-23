@@ -1,5 +1,6 @@
 package com.jaredxwos.coralie.bridge
 
+import android.util.Log
 import android.webkit.WebView
 import com.jaredxwos.coralie.mesh.AppMesh
 import kotlinx.serialization.json.Json
@@ -14,64 +15,282 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import java.lang.ref.WeakReference
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
 import kotlin.io.encoding.Base64
 
 /**
- * Sends unsolicited native events to the page without exposing a second bridge
- * object. Pages subscribe with ordinary DOM event listeners.
+ * Sends unsolicited native events to the page without exposing another bridge.
+ *
+ * Logs identify normalization failures, unavailable/closed WebViews, and
+ * JavaScript dispatch failures without logging event payload contents.
  */
-class CoralieEventEmitter(webView: WebView) {
-    private val webViewRef = WeakReference(webView)
+class CoralieEventEmitter(
+    webView: WebView,
+) {
+    private val webViewRef =
+        WeakReference(webView)
 
-    fun emit(type: String, data: JsonElement) {
-        val eventName = "coralie:$type"
-        val detail = normalize(type, data)
-        val script = "window.dispatchEvent(new CustomEvent(" +
-            Json.encodeToString(eventName) +
-            ", { detail: $detail }));"
+    private val closed =
+        AtomicBoolean(false)
 
-        webViewRef.get()?.post {
-            webViewRef.get()?.evaluateJavascript(script, null)
+    /**
+     * Stops future event delivery and releases the WebView reference.
+     * Call this before the owning WebView leaves composition or is destroyed.
+     */
+    fun close() {
+        if (closed.compareAndSet(false, true)) {
+            webViewRef.clear()
+            Log.i(TAG, "emitter.closed")
         }
     }
 
-    private fun normalize(type: String, data: JsonElement): JsonElement = when (type) {
-        "peers" -> buildJsonArray {
-            data.jsonArray.forEach { item ->
-                add(buildJsonObject {
-                    put("pubkeyHex", item.jsonPrimitive.content)
-                    put("connectedAt", JsonNull)
-                })
-            }
+    fun emit(
+        type: String,
+        data: JsonElement,
+    ) {
+        val eventId =
+            EVENT_IDS.getAndIncrement()
+        val eventName =
+            "coralie:$type"
+
+        val detail = try {
+            normalize(type, data)
+        } catch (error: Exception) {
+            Log.e(
+                TAG,
+                "event.normalize.fail " +
+                    "id=$eventId " +
+                    "type=$type " +
+                    "inputChars=${data.toString().length} " +
+                    "exception=${error.javaClass.name} " +
+                    "message=${oneLine(error.message.orEmpty(), 300)}",
+                error,
+            )
+            return
         }
 
-        "message" -> {
-            val source = data.jsonObject
-            val payloadBase64 = requireNotNull(source["payload"]) {
-                "message payload is missing"
-            }.jsonPrimitive.content
-            val payloadBytes = Base64.decode(payloadBase64)
+        val script = """
+            (() => {
+              try {
+                window.dispatchEvent(
+                  new CustomEvent(
+                    ${Json.encodeToString(eventName)},
+                    { detail: $detail },
+                  ),
+                );
+                return "ok";
+              } catch (error) {
+                console.error(
+                  "[Coralie native event $eventId] dispatch failed",
+                  error,
+                );
+                return "error:" + String(
+                  error?.stack || error,
+                );
+              }
+            })()
+        """.trimIndent()
 
-            buildJsonObject {
-                put("fromPubkeyHex", requireNotNull(source["fromPubkeyHex"]).jsonPrimitive.content)
-                put("toPubkeyHex", AppMesh.current?.myPubkeyHex.orEmpty())
-                put("timestamp", System.currentTimeMillis())
-                put("payload", buildJsonArray {
-                    payloadBytes.forEach { byte -> add(byte.toInt() and 0xff) }
-                })
-            }
+        if (closed.get()) {
+            Log.d(
+                TAG,
+                "event.drop " +
+                    "id=$eventId " +
+                    "type=$type " +
+                    "reason=emitter-closed",
+            )
+            return
         }
 
-        "terminalFailure" -> {
-            val source = data.jsonObject
-            buildJsonObject {
-                put("pubkeyHex", requireNotNull(source["pubkeyHex"]).jsonPrimitive.content)
-                put("attemptCount", requireNotNull(source["attemptsMade"]).jsonPrimitive.int)
-                put("reason", "retry-exhausted")
-            }
+        val webView = webViewRef.get()
+        if (webView == null) {
+            Log.w(
+                TAG,
+                "event.drop " +
+                    "id=$eventId " +
+                    "type=$type " +
+                    "reason=webview-reference-unavailable",
+            )
+            return
         }
 
-        // timerFired and any future native events are already valid JSON.
-        else -> data
+        val accepted = try {
+            webView.post {
+                if (closed.get()) {
+                    Log.d(
+                        TAG,
+                        "event.drop " +
+                            "id=$eventId " +
+                            "type=$type " +
+                            "reason=emitter-closed-before-dispatch",
+                    )
+                    return@post
+                }
+
+                val current = webViewRef.get()
+                if (current == null) {
+                    Log.w(
+                        TAG,
+                        "event.drop " +
+                            "id=$eventId " +
+                            "type=$type " +
+                            "reason=webview-reference-lost-before-dispatch",
+                    )
+                    return@post
+                }
+
+                try {
+                    current.evaluateJavascript(script) { result ->
+                        if (result != "\"ok\"") {
+                            Log.w(
+                                TAG,
+                                "event.dispatch.fail " +
+                                    "id=$eventId " +
+                                    "type=$type " +
+                                    "result=${oneLine(result.orEmpty(), 500)}",
+                            )
+                        }
+                    }
+                } catch (error: Exception) {
+                    Log.e(
+                        TAG,
+                        "event.evaluate.fail " +
+                            "id=$eventId " +
+                            "type=$type " +
+                            "closed=${closed.get()} " +
+                            "exception=${error.javaClass.name} " +
+                            "message=${oneLine(error.message.orEmpty(), 300)}",
+                        error,
+                    )
+                }
+            }
+        } catch (error: Exception) {
+            Log.e(
+                TAG,
+                "event.post.fail " +
+                    "id=$eventId " +
+                    "type=$type " +
+                    "exception=${error.javaClass.name} " +
+                    "message=${oneLine(error.message.orEmpty(), 300)}",
+                error,
+            )
+            false
+        }
+
+        if (!accepted) {
+            Log.w(
+                TAG,
+                "event.drop " +
+                    "id=$eventId " +
+                    "type=$type " +
+                    "reason=webview-post-rejected",
+            )
+        }
+    }
+
+    private fun normalize(
+        type: String,
+        data: JsonElement,
+    ): JsonElement =
+        when (type) {
+            "peers" ->
+                buildJsonArray {
+                    data.jsonArray.forEach { item ->
+                        add(
+                            buildJsonObject {
+                                put(
+                                    "pubkeyHex",
+                                    item.jsonPrimitive.content,
+                                )
+                                put(
+                                    "connectedAt",
+                                    JsonNull,
+                                )
+                            },
+                        )
+                    }
+                }
+
+            "message" -> {
+                val source =
+                    data.jsonObject
+                val payloadBase64 =
+                    requireNotNull(source["payload"]) {
+                        "message payload is missing"
+                    }.jsonPrimitive.content
+                val payloadBytes =
+                    Base64.decode(payloadBase64)
+
+                buildJsonObject {
+                    put(
+                        "fromPubkeyHex",
+                        requireNotNull(
+                            source["fromPubkeyHex"],
+                        ).jsonPrimitive.content,
+                    )
+                    put(
+                        "toPubkeyHex",
+                        AppMesh.current
+                            ?.myPubkeyHex
+                            .orEmpty(),
+                    )
+                    put(
+                        "timestamp",
+                        System.currentTimeMillis(),
+                    )
+                    put(
+                        "payload",
+                        buildJsonArray {
+                            payloadBytes.forEach { byte ->
+                                add(byte.toInt() and 0xff)
+                            }
+                        },
+                    )
+                }
+            }
+
+            "terminalFailure" -> {
+                val source =
+                    data.jsonObject
+                buildJsonObject {
+                    put(
+                        "pubkeyHex",
+                        requireNotNull(
+                            source["pubkeyHex"],
+                        ).jsonPrimitive.content,
+                    )
+                    put(
+                        "attemptCount",
+                        requireNotNull(
+                            source["attemptsMade"],
+                        ).jsonPrimitive.int,
+                    )
+                    put(
+                        "reason",
+                        "retry-exhausted",
+                    )
+                }
+            }
+
+            // timerFired and future events are already valid JSON.
+            else -> data
+        }
+
+    private fun oneLine(
+        value: String,
+        maxLength: Int,
+    ): String =
+        value
+            .replace(Regex("\\s+"), " ")
+            .trim()
+            .take(maxLength)
+
+    private companion object {
+        const val TAG =
+            "CoralieEvents"
+
+        val EVENT_IDS =
+            AtomicLong(1)
     }
 }

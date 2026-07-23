@@ -1,10 +1,12 @@
 package com.jaredxwos.coralie.ui.composable.screens
 
+import android.graphics.Bitmap
 import android.net.Uri
 import android.util.Log
 import android.view.ViewGroup
 import android.webkit.ConsoleMessage
 import android.webkit.WebChromeClient
+import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
@@ -54,6 +56,7 @@ import com.jaredxwos.coralie.ui.composable.component.dialogs.AppDialog
 import com.jaredxwos.coralie.ui.composable.component.dialogs.ButtonConfig
 import kotlinx.serialization.json.JsonElement
 import java.io.File
+import java.util.concurrent.atomic.AtomicReference
 
 private fun WebSettings.applySecurityModifiers() {
     javaScriptEnabled = true
@@ -69,6 +72,17 @@ private const val HOST = "appassets.androidplatform.net"
 private const val ASSET_ORIGIN = "$SCHEME://$HOST"
 private fun Uri.isSafe(): Boolean = scheme == SCHEME && host == HOST
 
+private fun Uri.safeForLog(): String {
+    val schemePart = scheme ?: "(no-scheme)"
+    val hostPart = host ?: "(no-host)"
+    val portPart = if (port >= 0) ":$port" else ""
+    val pathPart = encodedPath?.takeIf { it.isNotBlank() } ?: "/"
+    return "$schemePart://$hostPart$portPart$pathPart"
+}
+
+private const val WEBVIEW_TAG = "CoralieWebView"
+private const val WEB_CONSOLE_TAG = "CoralieWebConsole"
+
 @Composable
 fun ViewerScreen(
     assetId: Long,
@@ -81,6 +95,9 @@ fun ViewerScreen(
     val scope = rememberCoroutineScope()
     var status by remember { mutableStateOf<LoadStatus>(LoadStatus.Preparing) }
     var showLeaveConfirmation by remember { mutableStateOf(false) }
+    val eventEmitterRef = remember {
+        AtomicReference<CoralieEventEmitter?>(null)
+    }
 
     // Open the space + refresh-on-open the cache, before pointing the WebView anywhere.
     LaunchedEffect(assetId, spaceId) {
@@ -105,6 +122,9 @@ fun ViewerScreen(
 
     DisposableEffect(Unit) {
         onDispose {
+            eventEmitterRef
+                .getAndSet(null)
+                ?.close()
             AppStorage.closeSpaceSync()
             AppMesh.teardownForPageExit()
             AppTimers.teardownForPageExit()
@@ -174,6 +194,9 @@ fun ViewerScreen(
                             )
 
                             val eventEmitter = CoralieEventEmitter(this)
+                            eventEmitterRef
+                                .getAndSet(eventEmitter)
+                                ?.close()
                             val sendEvent: (String, JsonElement) -> Unit =
                                 eventEmitter::emit
                             AppMesh.attach(scope, sendEvent)
@@ -192,15 +215,125 @@ fun ViewerScreen(
                                 .build()
 
                             webViewClient = object : WebViewClient() {
-                                override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean =
-                                    !request.url.isSafe()
-                                override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? =
-                                    assetLoader.shouldInterceptRequest(request.url)
+                                override fun shouldOverrideUrlLoading(
+                                    view: WebView,
+                                    request: WebResourceRequest,
+                                ): Boolean {
+                                    val blocked = !request.url.isSafe()
+                                    if (blocked) {
+                                        Log.w(
+                                            WEBVIEW_TAG,
+                                            "navigation.blocked " +
+                                                "mainFrame=${request.isForMainFrame} " +
+                                                "method=${request.method} " +
+                                                "url=${request.url.safeForLog()}",
+                                        )
+                                    }
+                                    return blocked
+                                }
+
+                                override fun shouldInterceptRequest(
+                                    view: WebView,
+                                    request: WebResourceRequest,
+                                ): WebResourceResponse? =
+                                    assetLoader.shouldInterceptRequest(
+                                        request.url,
+                                    )
+
+                                override fun onPageStarted(
+                                    view: WebView,
+                                    url: String?,
+                                    favicon: Bitmap?,
+                                ) {
+                                    Log.i(
+                                        WEBVIEW_TAG,
+                                        "page.start assetId=$assetId " +
+                                            "url=${url?.let(Uri::parse)?.safeForLog() ?: "(null)"}",
+                                    )
+                                }
+
+                                override fun onPageFinished(
+                                    view: WebView,
+                                    url: String?,
+                                ) {
+                                    Log.i(
+                                        WEBVIEW_TAG,
+                                        "page.finish assetId=$assetId " +
+                                            "url=${url?.let(Uri::parse)?.safeForLog() ?: "(null)"}",
+                                    )
+                                }
+
+                                override fun onReceivedError(
+                                    view: WebView,
+                                    request: WebResourceRequest,
+                                    error: WebResourceError,
+                                ) {
+                                    val message =
+                                        "resource.error " +
+                                            "mainFrame=${request.isForMainFrame} " +
+                                            "method=${request.method} " +
+                                            "url=${request.url.safeForLog()} " +
+                                            "code=${error.errorCode} " +
+                                            "description=${error.description}"
+
+                                    if (request.isForMainFrame) {
+                                        Log.e(WEBVIEW_TAG, message)
+                                    } else {
+                                        Log.w(WEBVIEW_TAG, message)
+                                    }
+                                }
+
+                                override fun onReceivedHttpError(
+                                    view: WebView,
+                                    request: WebResourceRequest,
+                                    errorResponse: WebResourceResponse,
+                                ) {
+                                    val message =
+                                        "resource.httpError " +
+                                            "mainFrame=${request.isForMainFrame} " +
+                                            "method=${request.method} " +
+                                            "url=${request.url.safeForLog()} " +
+                                            "status=${errorResponse.statusCode} " +
+                                            "reason=${errorResponse.reasonPhrase.orEmpty()}"
+
+                                    if (request.isForMainFrame) {
+                                        Log.e(WEBVIEW_TAG, message)
+                                    } else {
+                                        Log.w(WEBVIEW_TAG, message)
+                                    }
+                                }
                             }
 
                             webChromeClient = object : WebChromeClient() {
-                                override fun onConsoleMessage(m: ConsoleMessage): Boolean {
-                                    Log.d("WebConsole", "${m.message()} -- line ${m.lineNumber()} of ${m.sourceId()}")
+                                override fun onConsoleMessage(
+                                    message: ConsoleMessage,
+                                ): Boolean {
+                                    val source =
+                                        message.sourceId()
+                                            ?.let(Uri::parse)
+                                            ?.lastPathSegment
+                                            ?.takeIf { it.isNotBlank() }
+                                            ?: message.sourceId()
+                                            ?: "(unknown source)"
+
+                                    val rendered =
+                                        "js.${message.messageLevel().name.lowercase()} " +
+                                            "assetId=$assetId " +
+                                            "source=$source:${message.lineNumber()} " +
+                                            "message=${message.message()}"
+
+                                    when (message.messageLevel()) {
+                                        ConsoleMessage.MessageLevel.ERROR ->
+                                            Log.e(WEB_CONSOLE_TAG, rendered)
+                                        ConsoleMessage.MessageLevel.WARNING ->
+                                            Log.w(WEB_CONSOLE_TAG, rendered)
+                                        ConsoleMessage.MessageLevel.TIP ->
+                                            Log.i(WEB_CONSOLE_TAG, rendered)
+                                        ConsoleMessage.MessageLevel.LOG ->
+                                            Log.i(WEB_CONSOLE_TAG, rendered)
+                                        ConsoleMessage.MessageLevel.DEBUG ->
+                                            Log.d(WEB_CONSOLE_TAG, rendered)
+                                    }
                                     return true
                                 }
                             }
