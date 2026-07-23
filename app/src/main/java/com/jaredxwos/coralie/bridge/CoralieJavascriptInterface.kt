@@ -9,6 +9,7 @@ import com.jaredxwos.coralie.mesh.AppMesh
 import com.jaredxwos.coralie.storage.AppStorage
 import com.jaredxwos.coralie.storage.HtmlStorage
 import com.jaredxwos.coralie.timer.AppTimers
+import com.jaredxwos.coralie.session.PermissionRejectedException
 import com.jaredxwos.coralie.session.ViewerSession
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.runBlocking
@@ -34,10 +35,9 @@ import androidx.core.net.toUri
 /**
  * Android implementation of the page-facing `window.Coralie` object.
  *
- * Every JavaScript-facing operation logs its own operation name before
- * rethrowing. HTTP additionally returns structured status-599 diagnostics so
- * WebView does not replace the useful Kotlin error with the generic
- * "Java exception was raised during method invocation" message.
+ * Every protected operation asks its ViewerSession to authorize the required
+ * capability. User rejection is rethrown to JavaScript; non-permission HTTP
+ * failures continue to return structured status-599 diagnostics.
  */
 class CoralieJavascriptInterface(
     private val session: ViewerSession,
@@ -49,43 +49,10 @@ class CoralieJavascriptInterface(
     @JavascriptInterface
     fun hostKind(): String = "android-native"
 
-    /** Effective persisted + allow-once grants, encoded as a JSON array. */
-    @JavascriptInterface
-    fun capabilitiesJson(): String =
-        session.capabilitiesJson()
-
-    @JavascriptInterface
-    fun hasCapability(capabilityName: String): Boolean =
-        PageCapability.fromWireName(capabilityName)
-            ?.let(session::hasCapability)
-            ?: false
-
-    /**
-     * Prompts the user when the capability is not already granted.
-     *
-     * Returns only after the user chooses Reject, Allow once, or Always allow.
-     * Call this from page code before invoking the protected operation.
-     */
-    @JavascriptInterface
-    fun requestCapability(capabilityName: String): Boolean =
-        loggedCall(
-            operation = "requestCapability",
-            details = "capability=${oneLine(capabilityName, 40)}",
-        ) {
-            val capability =
-                PageCapability.fromWireName(capabilityName)
-                    ?: throw IllegalArgumentException(
-                        "Unknown Coralie capability '$capabilityName'",
-                    )
-            runBlocking {
-                session.requestCapability(capability)
-            }
-        }
-
     @JavascriptInterface
     fun getPubkey(): String =
         loggedCall("getPubkey") {
-            requireCapability(
+            authorizeCapability(
                 PageCapability.MESH,
                 "getPubkey",
             )
@@ -98,7 +65,7 @@ class CoralieJavascriptInterface(
             operation = "addPeer",
             details = "peer=${shortPubkey(pubkeyHex)}",
         ) {
-            requireCapability(
+            authorizeCapability(
                 PageCapability.MESH,
                 "addPeer",
             )
@@ -117,7 +84,7 @@ class CoralieJavascriptInterface(
             operation = "sendMessage",
             details = "peer=${shortPubkey(toPubkeyHex)} payloadBytes=${payload.size}",
         ) {
-            requireCapability(
+            authorizeCapability(
                 PageCapability.MESH,
                 "sendMessage",
             )
@@ -143,7 +110,7 @@ class CoralieJavascriptInterface(
     @JavascriptInterface
     fun getPeersJson(): String =
         loggedCall("getPeersJson") {
-            requireCapability(
+            authorizeCapability(
                 PageCapability.MESH,
                 "getPeersJson",
             )
@@ -160,7 +127,7 @@ class CoralieJavascriptInterface(
     @JavascriptInterface
     fun reset(): String =
         loggedCall("reset") {
-            requireCapability(
+            authorizeCapability(
                 PageCapability.MESH,
                 "reset",
             )
@@ -170,7 +137,7 @@ class CoralieJavascriptInterface(
     @JavascriptInterface
     fun close() {
         loggedCall("close") {
-            requireCapability(
+            authorizeCapability(
                 PageCapability.MESH,
                 "close",
             )
@@ -190,7 +157,7 @@ class CoralieJavascriptInterface(
             operation = "storageGetItem",
             details = "key=${safeStorageKey(key)}",
         ) {
-            requireCapability(
+            authorizeCapability(
                 PageCapability.STORAGE,
                 "storageGetItem",
             )
@@ -211,7 +178,7 @@ class CoralieJavascriptInterface(
             operation = "storageSetItem",
             details = "key=${safeStorageKey(key)} valueChars=${value.length}",
         ) {
-            requireCapability(
+            authorizeCapability(
                 PageCapability.STORAGE,
                 "storageSetItem",
             )
@@ -229,7 +196,7 @@ class CoralieJavascriptInterface(
             operation = "storageRemoveItem",
             details = "key=${safeStorageKey(key)}",
         ) {
-            requireCapability(
+            authorizeCapability(
                 PageCapability.STORAGE,
                 "storageRemoveItem",
             )
@@ -261,7 +228,7 @@ class CoralieJavascriptInterface(
 
         return try {
             stage = "capability-check"
-            requireCapability(
+            authorizeCapability(
                 PageCapability.HTTP,
                 "httpRequestJson",
             )
@@ -319,7 +286,12 @@ class CoralieJavascriptInterface(
                 // thread. AppProxy uses thread-safe StateFlow for permission
                 // prompts and Dispatchers.IO for the network request, so moving
                 // the whole operation onto Main would freeze Compose/WebView UI.
-                proxyHttpRequest(params)
+                proxyHttpRequest(params) { domain ->
+                    session.authorizeDomain(
+                        domain = domain,
+                        operation = "httpRequestJson",
+                    )
+                }
             }
 
             stage = "validate-response"
@@ -382,6 +354,23 @@ class CoralieJavascriptInterface(
             }
 
             response.toString()
+        } catch (error: PermissionRejectedException) {
+            val elapsedMs =
+                SystemClock.elapsedRealtime() - startedAt
+            Log.w(
+                TAG,
+                "http.rejected " +
+                    "id=$requestId " +
+                    "stage=$stage " +
+                    "scope=${error.scope.name.lowercase()} " +
+                    "target=${oneLine(error.target, 160)} " +
+                    "operation=${error.operation} " +
+                    "elapsedMs=$elapsedMs",
+            )
+            // Do not convert a user rejection into status 599. Throwing makes
+            // `await Coralie.httpRequestJson(...)` reject, matching browser
+            // fetch/network rejection semantics.
+            throw error
         } catch (error: Exception) {
             val elapsedMs =
                 SystemClock.elapsedRealtime() - startedAt
@@ -455,7 +444,7 @@ class CoralieJavascriptInterface(
                     "delaySeconds=$delaySeconds " +
                     "payloadChars=${payload?.length ?: 0}",
         ) {
-            requireCapability(
+            authorizeCapability(
                 PageCapability.TIMERS,
                 "timerQueue",
             )
@@ -475,7 +464,7 @@ class CoralieJavascriptInterface(
             operation = "timerCancel",
             details = "id=${oneLine(id, 80)}",
         ) {
-            requireCapability(
+            authorizeCapability(
                 PageCapability.TIMERS,
                 "timerCancel",
             )
@@ -486,7 +475,7 @@ class CoralieJavascriptInterface(
     @JavascriptInterface
     fun timerListJson(): String =
         loggedCall("timerListJson") {
-            requireCapability(
+            authorizeCapability(
                 PageCapability.TIMERS,
                 "timerListJson",
             )
@@ -500,28 +489,15 @@ class CoralieJavascriptInterface(
             }.toString()
         }
 
-    private fun requireCapability(
+    private fun authorizeCapability(
         capability: PageCapability,
         operation: String,
     ) {
-        try {
-            session.requireCapability(
+        runBlocking {
+            session.authorizeCapability(
                 capability = capability,
                 operation = operation,
             )
-            runBlocking {
-                session.ensureCapabilityReady(capability)
-            }
-        } catch (error: SecurityException) {
-            Log.w(
-                TAG,
-                "capability.denied " +
-                    "session=${session.sessionId} " +
-                    "operation=$operation " +
-                    "required=${capability.wireName} " +
-                    "granted=${session.capabilitiesJson()}",
-            )
-            throw error
         }
     }
 
@@ -554,6 +530,27 @@ class CoralieJavascriptInterface(
         val startedAt = SystemClock.elapsedRealtime()
         return try {
             block()
+        } catch (error: PermissionRejectedException) {
+            val elapsedMs =
+                SystemClock.elapsedRealtime() - startedAt
+            Log.w(
+                TAG,
+                buildString {
+                    append("call.rejected")
+                    append(" operation=").append(operation)
+                    if (details.isNotBlank()) {
+                        append(' ').append(details)
+                    }
+                    append(" scope=").append(
+                        error.scope.name.lowercase(),
+                    )
+                    append(" target=").append(
+                        oneLine(error.target, 160),
+                    )
+                    append(" elapsedMs=").append(elapsedMs)
+                },
+            )
+            throw error
         } catch (error: Exception) {
             val elapsedMs =
                 SystemClock.elapsedRealtime() - startedAt
@@ -644,29 +641,6 @@ class CoralieJavascriptInterface(
     private fun classifyHttpFailure(
         error: Throwable,
     ): String {
-        val chainText =
-            generateSequence(error) { it.cause }
-                .take(MAX_CAUSE_DEPTH)
-                .joinToString(" ") {
-                    "${it.javaClass.name} ${it.message.orEmpty()}"
-                }
-                .lowercase()
-
-        if (
-            "capability" in chainText &&
-            "not granted" in chainText
-        ) {
-            return "capability-denied"
-        }
-
-        if (
-            "rejected" in chainText ||
-            "denied" in chainText ||
-            "not allowed" in chainText
-        ) {
-            return "permission-denied"
-        }
-
         val root = rootCause(error)
         return when (root) {
             is CancellationException -> "cancelled"

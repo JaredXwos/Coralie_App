@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="domain_prompt_title">Allow network access?</string>
+    <string name="domain_prompt_message">%1$s wants to communicate with:\n\n%2$s\n\nChoose whether to allow access for this session or remember your choice for future sessions.</string>
+</resources>

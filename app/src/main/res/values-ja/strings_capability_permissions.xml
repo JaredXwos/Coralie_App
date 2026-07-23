@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="capability_prompt_title">ページの権限を許可しますか？</string>
+    <string name="capability_prompt_message">%1$s が次の機能を使用する権限を要求しています：\n\n%2$s\n\nこのセッションのみ許可するか、今後のセッションでも許可するかを選択してください。</string>
+</resources>

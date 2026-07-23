@@ -2,13 +2,17 @@ package com.jaredxwos.coralie.session
 
 import android.util.Log
 import android.webkit.WebView
-import com.jaredxwos.coralie.bridge.AppProxy
 import com.jaredxwos.coralie.bridge.CoralieEventEmitter
 import com.jaredxwos.coralie.capability.PageCapabilities
 import com.jaredxwos.coralie.capability.PageCapability
 import com.jaredxwos.coralie.mesh.AppMesh
 import com.jaredxwos.coralie.storage.AppStorage
 import com.jaredxwos.coralie.timer.AppTimers
+import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.AtomicReference
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -16,33 +20,56 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import java.util.UUID
-import java.util.concurrent.atomic.AtomicBoolean
-import java.util.concurrent.atomic.AtomicLong
-import java.util.concurrent.atomic.AtomicReference
 
-enum class CapabilityDecision {
+/** The three choices shared by capability and HTTP-domain prompts. */
+enum class PermissionDecision {
     REJECT,
     ALLOW_ONCE,
     ALLOW_ALWAYS,
 }
 
-data class CapabilityPrompt(
+sealed interface SessionPermissionPrompt
+
+data class CapabilityPermissionPrompt(
     val capability: PageCapability,
+) : SessionPermissionPrompt
+
+data class DomainPermissionPrompt(
+    val domain: String,
+) : SessionPermissionPrompt
+
+enum class PermissionScope {
+    CAPABILITY,
+    DOMAIN,
+}
+
+/**
+ * Raised when the user rejects a protected operation.
+ *
+ * JavaScript should simply call the operation with `await`; Android prompts
+ * transparently and a rejected operation throws instead of returning a value.
+ */
+class PermissionRejectedException(
+    val scope: PermissionScope,
+    val target: String,
+    val operation: String,
+) : SecurityException(
+    "Permission rejected: scope=${scope.name.lowercase()} " +
+        "target=$target operation=$operation",
 )
 
 /**
- * Owns one open HTML page's native lifetime.
+ * Owns one open HTML page's native lifetime and permission state.
  *
- * Persisted grants come from the HTML database row. ALLOW_ONCE grants are held
- * only in this object and disappear when [close] is called. ALLOW_ALWAYS updates
- * the HTML row before the method returns to JavaScript.
+ * Persistent grants come from the database. Allow-once and rejected decisions
+ * exist only in this session and disappear when [close] is called. Page code is
+ * not told which grant duration was selected.
  */
 class ViewerSession(
     val assetId: Long,
@@ -58,6 +85,11 @@ class ViewerSession(
     private val rejectedMask = AtomicLong(PageCapabilities.NONE_MASK)
     private val activatedMask = AtomicLong(PageCapabilities.NONE_MASK)
 
+    private val allowedDomains =
+        ConcurrentHashMap.newKeySet<String>()
+    private val rejectedDomains =
+        ConcurrentHashMap.newKeySet<String>()
+
     private val sessionJob =
         SupervisorJob(parentScope.coroutineContext[Job])
     val scope =
@@ -69,38 +101,24 @@ class ViewerSession(
     private val activationGate = Mutex()
     private val permissionGate = Mutex()
     private var pendingDecision:
-        CompletableDeferred<CapabilityDecision>? = null
+        CompletableDeferred<PermissionDecision>? = null
 
     private val _permissionPrompt =
-        MutableStateFlow<CapabilityPrompt?>(null)
-    val permissionPrompt: StateFlow<CapabilityPrompt?> =
+        MutableStateFlow<SessionPermissionPrompt?>(null)
+    val permissionPrompt: StateFlow<SessionPermissionPrompt?> =
         _permissionPrompt.asStateFlow()
 
-    fun capabilities(): PageCapabilities =
+    fun effectiveCapabilities(): PageCapabilities =
         PageCapabilities(
             persistedMask.get() or onceMask.get(),
         )
 
-    fun capabilitiesJson(): String =
-        capabilities().toJson()
-
     fun hasCapability(
         capability: PageCapability,
     ): Boolean =
-        capabilities().allows(capability)
+        effectiveCapabilities().allows(capability)
 
-    fun requireCapability(
-        capability: PageCapability,
-        operation: String,
-    ) {
-        checkOpen()
-        capabilities().require(capability, operation)
-    }
-
-    /**
-     * Opens resources needed by capabilities already persisted for the page.
-     * Mesh/timer activation waits until a WebView event emitter is attached.
-     */
+    /** Prepare resources that were already persistently granted. */
     suspend fun prepare() {
         checkOpen()
         if (hasCapability(PageCapability.STORAGE)) {
@@ -114,42 +132,52 @@ class ViewerSession(
         emitterRef.getAndSet(emitter)?.close()
 
         scope.launchSafely("activate-attached-capabilities") {
-            for (capability in capabilities().asSet()) {
+            for (capability in effectiveCapabilities().asSet()) {
                 ensureCapabilityReady(capability)
             }
         }
     }
 
-    suspend fun requestCapability(
+    /**
+     * Called by every protected native method. The page does not request or
+     * inspect permission separately; invoking the method is the request.
+     */
+    suspend fun authorizeCapability(
         capability: PageCapability,
-    ): Boolean {
+        operation: String,
+    ) {
         checkOpen()
 
         if (hasCapability(capability)) {
             ensureCapabilityReady(capability)
-            return true
+            return
         }
         if (rejectedMask.get() and capability.bit != 0L) {
-            return false
+            throw rejectedCapability(capability, operation)
         }
 
-        return permissionGate.withLock {
+        permissionGate.withLock {
             if (hasCapability(capability)) {
                 ensureCapabilityReady(capability)
-                return@withLock true
+                return@withLock
             }
             if (rejectedMask.get() and capability.bit != 0L) {
-                return@withLock false
+                throw rejectedCapability(capability, operation)
             }
 
-            when (awaitDecision(capability)) {
-                CapabilityDecision.ALLOW_ONCE -> {
-                    onceMask.getAndUpdate { it or capability.bit }
+            when (
+                awaitDecision(
+                    CapabilityPermissionPrompt(capability),
+                )
+            ) {
+                PermissionDecision.ALLOW_ONCE -> {
+                    onceMask.getAndUpdate {
+                        it or capability.bit
+                    }
                     ensureCapabilityReady(capability)
-                    true
                 }
 
-                CapabilityDecision.ALLOW_ALWAYS -> {
+                PermissionDecision.ALLOW_ALWAYS -> {
                     val updated =
                         PageCapabilities(
                             persistedMask.get() or capability.bit,
@@ -165,21 +193,81 @@ class ViewerSession(
                         it and capability.bit.inv()
                     }
                     ensureCapabilityReady(capability)
-                    true
                 }
 
-                CapabilityDecision.REJECT -> {
+                PermissionDecision.REJECT -> {
                     rejectedMask.getAndUpdate {
                         it or capability.bit
                     }
-                    false
+                    throw rejectedCapability(
+                        capability,
+                        operation,
+                    )
                 }
             }
         }
     }
 
-    fun resolveCapabilityPrompt(
-        decision: CapabilityDecision,
+    /** Authorizes one HTTPS domain using the same session/persistent choices. */
+    suspend fun authorizeDomain(
+        domain: String,
+        operation: String,
+    ) {
+        checkOpen()
+        val normalized = normalizeDomain(domain)
+
+        if (
+            normalized in allowedDomains ||
+            isPersistedDomainAllowed(normalized)
+        ) {
+            return
+        }
+        if (normalized in rejectedDomains) {
+            throw rejectedDomain(normalized, operation)
+        }
+
+        permissionGate.withLock {
+            if (
+                normalized in allowedDomains ||
+                isPersistedDomainAllowed(normalized)
+            ) {
+                return@withLock
+            }
+            if (normalized in rejectedDomains) {
+                throw rejectedDomain(normalized, operation)
+            }
+
+            when (
+                awaitDecision(
+                    DomainPermissionPrompt(normalized),
+                )
+            ) {
+                PermissionDecision.ALLOW_ONCE -> {
+                    allowedDomains += normalized
+                }
+
+                PermissionDecision.ALLOW_ALWAYS -> {
+                    withContext(Dispatchers.IO) {
+                        AppStorage.allowDomain(normalized)
+                            .getOrThrow()
+                    }
+                    allowedDomains += normalized
+                    rejectedDomains -= normalized
+                }
+
+                PermissionDecision.REJECT -> {
+                    rejectedDomains += normalized
+                    throw rejectedDomain(
+                        normalized,
+                        operation,
+                    )
+                }
+            }
+        }
+    }
+
+    fun resolvePermissionPrompt(
+        decision: PermissionDecision,
     ) {
         pendingDecision?.complete(decision)
     }
@@ -223,7 +311,6 @@ class ViewerSession(
                 PageCapability.HTTP -> Unit
             }
 
-            // Mesh/timers are not considered active until an emitter exists.
             if (
                 capability == PageCapability.MESH ||
                 capability == PageCapability.TIMERS
@@ -232,6 +319,7 @@ class ViewerSession(
                     return
                 }
             }
+
             activatedMask.getAndUpdate {
                 it or capability.bit
             }
@@ -243,7 +331,7 @@ class ViewerSession(
             return
         }
 
-        pendingDecision?.complete(CapabilityDecision.REJECT)
+        pendingDecision?.complete(PermissionDecision.REJECT)
         pendingDecision = null
         _permissionPrompt.value = null
 
@@ -260,7 +348,8 @@ class ViewerSession(
             AppTimers.teardownForPageExit()
         }
 
-        AppProxy.teardownForPageExit()
+        allowedDomains.clear()
+        rejectedDomains.clear()
         scope.cancel("ViewerSession closed")
 
         Log.i(
@@ -270,19 +359,17 @@ class ViewerSession(
     }
 
     private suspend fun awaitDecision(
-        capability: PageCapability,
-    ): CapabilityDecision {
+        prompt: SessionPermissionPrompt,
+    ): PermissionDecision {
         val deferred =
-            CompletableDeferred<CapabilityDecision>()
+            CompletableDeferred<PermissionDecision>()
         pendingDecision = deferred
-        _permissionPrompt.value =
-            CapabilityPrompt(capability)
+        _permissionPrompt.value = prompt
 
         Log.i(
             TAG,
             "permission.prompt id=$sessionId " +
-                "assetId=$assetId " +
-                "capability=${capability.wireName}",
+                "assetId=$assetId target=${prompt.logTarget()}",
         )
 
         return try {
@@ -292,6 +379,45 @@ class ViewerSession(
             pendingDecision = null
         }
     }
+
+    private suspend fun isPersistedDomainAllowed(
+        domain: String,
+    ): Boolean =
+        withContext(Dispatchers.IO) {
+            AppStorage.isDomainAllowed(domain)
+                .getOrDefault(false)
+        }
+
+    private fun rejectedCapability(
+        capability: PageCapability,
+        operation: String,
+    ): PermissionRejectedException =
+        PermissionRejectedException(
+            scope = PermissionScope.CAPABILITY,
+            target = capability.wireName,
+            operation = operation,
+        )
+
+    private fun rejectedDomain(
+        domain: String,
+        operation: String,
+    ): PermissionRejectedException =
+        PermissionRejectedException(
+            scope = PermissionScope.DOMAIN,
+            target = domain,
+            operation = operation,
+        )
+
+    private fun normalizeDomain(domain: String): String =
+        domain.trim().trimEnd('.').lowercase()
+
+    private fun SessionPermissionPrompt.logTarget(): String =
+        when (this) {
+            is CapabilityPermissionPrompt ->
+                "capability:${capability.wireName}"
+            is DomainPermissionPrompt ->
+                "domain:$domain"
+        }
 
     private fun checkOpen() {
         check(!closed.get()) {

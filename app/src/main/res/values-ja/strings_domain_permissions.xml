@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="domain_prompt_title">ネットワークアクセスを許可しますか？</string>
+    <string name="domain_prompt_message">%1$s が次のドメインと通信しようとしています：\n\n%2$s\n\nこのセッションのみ許可するか、今後のセッションでも許可するかを選択してください。</string>
+</resources>

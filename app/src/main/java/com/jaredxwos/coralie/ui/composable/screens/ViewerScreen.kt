@@ -48,8 +48,10 @@ import androidx.webkit.WebViewAssetLoader
 import com.jaredxwos.coralie.R
 import com.jaredxwos.coralie.capability.PageCapabilities
 import com.jaredxwos.coralie.capability.PageCapability
-import com.jaredxwos.coralie.session.CapabilityDecision
-import com.jaredxwos.coralie.session.CapabilityPrompt
+import com.jaredxwos.coralie.session.CapabilityPermissionPrompt
+import com.jaredxwos.coralie.session.DomainPermissionPrompt
+import com.jaredxwos.coralie.session.PermissionDecision
+import com.jaredxwos.coralie.session.SessionPermissionPrompt
 import com.jaredxwos.coralie.session.ViewerSession
 import com.jaredxwos.coralie.bridge.AppProxy
 import com.jaredxwos.coralie.bridge.CoralieJavascriptInterface
@@ -106,8 +108,8 @@ fun ViewerScreen(
     val viewerSessionRef = remember {
         AtomicReference<ViewerSession?>(null)
     }
-    val emptyCapabilityPromptFlow = remember {
-        MutableStateFlow<CapabilityPrompt?>(null)
+    val emptyPermissionPromptFlow = remember {
+        MutableStateFlow<SessionPermissionPrompt?>(null)
     }
 
     // Load the persisted page policy before starting any native subsystem.
@@ -173,7 +175,7 @@ fun ViewerScreen(
             WEBVIEW_TAG,
             "session.loaded assetId=$assetId " +
                 "session=${newSession.sessionId} " +
-                "granted=${newSession.capabilitiesJson()}",
+                "granted=${newSession.effectiveCapabilities().toJson()}",
         )
 
         AppStorage.cache(assetId)
@@ -292,7 +294,7 @@ fun ViewerScreen(
                                 "session.activate " +
                                     "assetId=$assetId " +
                                     "session=${session.sessionId} " +
-                                    "granted=${session.capabilitiesJson()}",
+                                    "granted=${session.effectiveCapabilities().toJson()}",
                             )
 
                             val assetLoader = WebViewAssetLoader.Builder()
@@ -466,38 +468,70 @@ fun ViewerScreen(
         )
     }
 
-    val capabilityPromptFlow =
+    val permissionPromptFlow =
         viewerSession?.permissionPrompt
-            ?: emptyCapabilityPromptFlow
-    val capabilityPrompt by capabilityPromptFlow.collectAsState()
+            ?: emptyPermissionPromptFlow
+    val permissionPrompt by
+        permissionPromptFlow.collectAsState()
 
-    capabilityPrompt?.let { prompt ->
-        val capabilityName =
-            when (prompt.capability) {
-                PageCapability.MESH ->
-                    stringResource(R.string.capability_mesh_title)
-                PageCapability.STORAGE ->
-                    stringResource(R.string.capability_storage_title)
-                PageCapability.HTTP ->
-                    stringResource(R.string.capability_http_title)
-                PageCapability.TIMERS ->
-                    stringResource(R.string.capability_timers_title)
+    permissionPrompt?.let { prompt ->
+        val title: String
+        val message: String
+
+        when (prompt) {
+            is CapabilityPermissionPrompt -> {
+                val capabilityName =
+                    when (prompt.capability) {
+                        PageCapability.MESH ->
+                            stringResource(
+                                R.string.capability_mesh_title,
+                            )
+                        PageCapability.STORAGE ->
+                            stringResource(
+                                R.string.capability_storage_title,
+                            )
+                        PageCapability.HTTP ->
+                            stringResource(
+                                R.string.capability_http_title,
+                            )
+                        PageCapability.TIMERS ->
+                            stringResource(
+                                R.string.capability_timers_title,
+                            )
+                    }
+
+                title =
+                    stringResource(
+                        R.string.capability_prompt_title,
+                    )
+                message =
+                    stringResource(
+                        R.string.capability_prompt_message,
+                        name,
+                        capabilityName,
+                    )
             }
 
+            is DomainPermissionPrompt -> {
+                title =
+                    stringResource(
+                        R.string.domain_prompt_title,
+                    )
+                message =
+                    stringResource(
+                        R.string.domain_prompt_message,
+                        name,
+                        prompt.domain,
+                    )
+            }
+        }
+
         AppDialog(
-            title =
-                stringResource(
-                    R.string.capability_prompt_title,
-                ),
-            message =
-                stringResource(
-                    R.string.capability_prompt_message,
-                    name,
-                    capabilityName,
-                ),
+            title = title,
+            message = message,
             onDismiss = {
-                viewerSession?.resolveCapabilityPrompt(
-                    CapabilityDecision.REJECT,
+                viewerSession?.resolvePermissionPrompt(
+                    PermissionDecision.REJECT,
                 )
             },
             isWarning = true,
@@ -509,9 +543,10 @@ fun ViewerScreen(
                             R.string.permission_reject,
                         ),
                     effect = {
-                        viewerSession?.resolveCapabilityPrompt(
-                            CapabilityDecision.REJECT,
-                        )
+                        viewerSession
+                            ?.resolvePermissionPrompt(
+                                PermissionDecision.REJECT,
+                            )
                     },
                 ),
                 ButtonConfig(
@@ -521,9 +556,10 @@ fun ViewerScreen(
                             R.string.permission_allow_once,
                         ),
                     effect = {
-                        viewerSession?.resolveCapabilityPrompt(
-                            CapabilityDecision.ALLOW_ONCE,
-                        )
+                        viewerSession
+                            ?.resolvePermissionPrompt(
+                                PermissionDecision.ALLOW_ONCE,
+                            )
                     },
                 ),
                 ButtonConfig(
@@ -533,45 +569,16 @@ fun ViewerScreen(
                             R.string.permission_allow_always,
                         ),
                     effect = {
-                        viewerSession?.resolveCapabilityPrompt(
-                            CapabilityDecision.ALLOW_ALWAYS,
-                        )
+                        viewerSession
+                            ?.resolvePermissionPrompt(
+                                PermissionDecision.ALLOW_ALWAYS,
+                            )
                     },
                 ),
             ),
         )
     }
 
-    // --- Native-HTTP consent prompt: shown whenever AppProxy needs a decision
-    // for a domain not already on the allowlist for this page/session. ---
-    val permissionDomain by AppProxy.prompt.collectAsState()
-    if (
-        viewerSession
-            ?.hasCapability(PageCapability.HTTP) == true
-    ) {
-        permissionDomain?.let { domain ->
-            AppDialog(
-            title = "Allow network request?",
-            message = "This page is trying to reach \"$domain\". Allow it to send the request?",
-            onDismiss = { AppProxy.resolvePrompt(AppProxy.Decision.REJECT) },
-            isWarning = true,
-            buttons = listOf(
-                ButtonConfig(
-                    isWarning = false,
-                    text = "Reject",
-                    effect = { AppProxy.resolvePrompt(AppProxy.Decision.REJECT) }),
-                ButtonConfig(
-                    isWarning = false,
-                    text = "Allow",
-                    effect = { AppProxy.resolvePrompt(AppProxy.Decision.ALLOW_ONCE) }),
-                ButtonConfig(
-                    isWarning = true,
-                    text = "Always allow",
-                    effect = { AppProxy.resolvePrompt(AppProxy.Decision.ALLOW_ALWAYS) }),
-            ),
-            )
-        }
-    }
 }
 
 private sealed interface LoadStatus {

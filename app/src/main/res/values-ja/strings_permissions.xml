@@ -1,7 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="capability_prompt_title">ページの権限を許可しますか？</string>
-    <string name="capability_prompt_message">%1$s が「%2$s」の権限を要求しています。</string>
+    <!-- ページ機能とHTTPドメインの確認画面で共通して使用する操作。 -->
     <string name="permission_reject">拒否</string>
     <string name="permission_allow_once">今回のみ許可</string>
     <string name="permission_allow_always">常に許可</string>

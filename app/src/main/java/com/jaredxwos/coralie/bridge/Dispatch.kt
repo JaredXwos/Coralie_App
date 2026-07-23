@@ -58,7 +58,6 @@ val callbacks: Map<String, suspend (JsonElement) -> JsonElement> = mapOf(
     "queueTimer" to ::timerQueue,
     "cancelTimer" to ::timerCancel,
     "listTimers" to ::timerList,
-    "httpRequest" to ::proxyHttpRequest,
 )
 
 suspend fun dispatch(message: WebMessageCompat): BridgeResponse {

@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="capability_prompt_title">Allow page permission?</string>
+    <string name="capability_prompt_message">%1$s wants permission to use:\n\n%2$s\n\nChoose whether to allow it for this session or remember your choice for future sessions.</string>
+</resources>
