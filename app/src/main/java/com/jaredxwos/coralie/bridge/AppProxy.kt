@@ -1,6 +1,6 @@
 package com.jaredxwos.coralie.bridge
 
-import java.io.IOException
+import java.io.ByteArrayOutputStream
 import java.net.InetAddress
 import java.net.UnknownHostException
 import java.util.concurrent.TimeUnit
@@ -20,6 +20,7 @@ import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.ResponseBody
 import okhttp3.RequestBody.Companion.toRequestBody
 
 @Serializable
@@ -70,8 +71,9 @@ suspend fun proxyHttpRequest(
 
 /** HTTP transport shared by the current viewer session. */
 object AppProxy {
-    private const val MAX_RESPONSE_BYTES =
-        5L * 1024L * 1024L
+    /** Fixed hard ceiling for one decoded native HTTP response body. */
+    internal const val MAX_RESPONSE_BYTES =
+        64L * 1024L * 1024L // 64 MiB
 
     private val safeDns = Dns { hostname ->
         Dns.SYSTEM.lookup(hostname)
@@ -136,15 +138,6 @@ object AppProxy {
             client.newCall(builder.build())
                 .execute()
                 .use { response ->
-                    if (
-                        response.body.contentLength() >
-                        MAX_RESPONSE_BYTES
-                    ) {
-                        throw IOException(
-                            "Response exceeds size limit",
-                        )
-                    }
-
                     HttpResponseData(
                         status = response.code,
                         statusText = response.message,
@@ -154,10 +147,70 @@ object AppProxy {
                                 .mapValues { (_, values) ->
                                     values.joinToString(", ")
                                 },
-                        body = response.body.string(),
+                        body = readResponseBodyLimited(
+                            body = response.body,
+                            maximumBytes = MAX_RESPONSE_BYTES,
+                        ),
                     )
                 }
         }
+
+    /**
+     * Reads the decoded OkHttp response stream without allowing an unbounded
+     * allocation. The declared length is checked first when available, then
+     * the actual stream is counted because gzip/chunked bodies often report -1.
+     */
+    internal fun readResponseBodyLimited(
+        body: ResponseBody,
+        maximumBytes: Long = MAX_RESPONSE_BYTES,
+    ): String {
+        require(maximumBytes > 0L) {
+            "maximumBytes must be positive"
+        }
+
+        val declaredLength = body.contentLength()
+        if (
+            declaredLength >= 0L &&
+            declaredLength > maximumBytes
+        ) {
+            throw ResponseTooLargeException(
+                limitBytes = maximumBytes,
+                observedBytes = declaredLength,
+                declaredByServer = true,
+            )
+        }
+
+        val charset =
+            body.contentType()
+                ?.charset(Charsets.UTF_8)
+                ?: Charsets.UTF_8
+
+        body.byteStream().use { input ->
+            val output = ByteArrayOutputStream()
+            val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+            var totalBytes = 0L
+
+            while (true) {
+                val count = input.read(buffer)
+                if (count == -1) {
+                    break
+                }
+
+                totalBytes += count
+                if (totalBytes > maximumBytes) {
+                    throw ResponseTooLargeException(
+                        limitBytes = maximumBytes,
+                        observedBytes = totalBytes,
+                        declaredByServer = false,
+                    )
+                }
+
+                output.write(buffer, 0, count)
+            }
+
+            return output.toByteArray().toString(charset)
+        }
+    }
 
     private fun InetAddress.isPubliclyRoutable(): Boolean {
         if (

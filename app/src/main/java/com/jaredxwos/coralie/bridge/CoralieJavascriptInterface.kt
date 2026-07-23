@@ -609,7 +609,14 @@ class CoralieJavascriptInterface(
 
         return buildJsonObject {
             put("status", 599)
-            put("statusText", "Native HTTP failure")
+            put(
+                "statusText",
+                if (category == "response-too-large") {
+                    "Native response too large"
+                } else {
+                    "Native HTTP failure"
+                },
+            )
             put("headers", buildJsonObject {})
             put(
                 "body",
@@ -633,6 +640,22 @@ class CoralieJavascriptInterface(
                         "causeChain",
                         causeChain(error),
                     )
+
+                    findResponseTooLarge(error)
+                        ?.let { oversized ->
+                            put(
+                                "limitBytes",
+                                oversized.limitBytes,
+                            )
+                            put(
+                                "observedBytes",
+                                oversized.observedBytes,
+                            )
+                            put(
+                                "declaredByServer",
+                                oversized.declaredByServer,
+                            )
+                        }
                 }.toString(),
             )
         }.toString()
@@ -643,6 +666,8 @@ class CoralieJavascriptInterface(
     ): String {
         val root = rootCause(error)
         return when (root) {
+            is ResponseTooLargeException ->
+                "response-too-large"
             is CancellationException -> "cancelled"
             is SocketTimeoutException -> "timeout"
             is UnknownHostException -> "dns"
@@ -655,6 +680,14 @@ class CoralieJavascriptInterface(
             else -> "internal"
         }
     }
+
+    private fun findResponseTooLarge(
+        error: Throwable,
+    ): ResponseTooLargeException? =
+        generateSequence(error) { it.cause }
+            .take(MAX_CAUSE_DEPTH)
+            .filterIsInstance<ResponseTooLargeException>()
+            .firstOrNull()
 
     private fun rootCause(
         error: Throwable,
