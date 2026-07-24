@@ -46,6 +46,8 @@ import androidx.webkit.WebViewAssetLoader
 import com.jaredxwos.coralie.R
 import com.jaredxwos.coralie.feature.viewer.runtime.http.NativeHttpProxy
 import com.jaredxwos.coralie.feature.viewer.bridge.CoralieJavascriptInterface
+import com.jaredxwos.coralie.feature.viewer.webview.CORALIE_HOST_PATH_PREFIX
+import com.jaredxwos.coralie.feature.viewer.webview.CoralieHostPathHandler
 import com.jaredxwos.coralie.data.library.model.PageCapability
 import com.jaredxwos.coralie.feature.viewer.runtime.permission.CapabilityPermissionPrompt
 import com.jaredxwos.coralie.feature.viewer.runtime.permission.DomainPermissionPrompt
@@ -574,6 +576,10 @@ private fun PageWebView(
                 val assetLoader =
                     WebViewAssetLoader
                         .Builder()
+                        .addPathHandler(
+                            CORALIE_HOST_PATH_PREFIX,
+                            CoralieHostPathHandler(),
+                        )
                         .addPathHandler(
                             "/assets/",
                             WebViewAssetLoader
