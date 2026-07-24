@@ -46,7 +46,8 @@ import androidx.webkit.WebViewAssetLoader
 import com.jaredxwos.coralie.R
 import com.jaredxwos.coralie.feature.viewer.runtime.http.NativeHttpProxy
 import com.jaredxwos.coralie.feature.viewer.bridge.CoralieJavascriptInterface
-import com.jaredxwos.coralie.feature.viewer.webview.CORALIE_HOST_PATH_PREFIX
+import com.jaredxwos.coralie.feature.viewer.webview.CORALIE_HOST_CACHE_PATH_PREFIX
+import com.jaredxwos.coralie.feature.viewer.webview.CORALIE_HOST_ROOT_PATH_PREFIX
 import com.jaredxwos.coralie.feature.viewer.webview.CoralieHostPathHandler
 import com.jaredxwos.coralie.data.library.model.PageCapability
 import com.jaredxwos.coralie.feature.viewer.runtime.permission.CapabilityPermissionPrompt
@@ -573,12 +574,24 @@ private fun PageWebView(
                             "html",
                         )
 
+                val coralieHostPathHandler =
+                    CoralieHostPathHandler()
+
                 val assetLoader =
                     WebViewAssetLoader
                         .Builder()
+                        // Relative imports from a cached page resolve under
+                        // /cache/. Register this before the general /cache/
+                        // handler so the no-op bootstrap wins.
                         .addPathHandler(
-                            CORALIE_HOST_PATH_PREFIX,
-                            CoralieHostPathHandler(),
+                            CORALIE_HOST_CACHE_PATH_PREFIX,
+                            coralieHostPathHandler,
+                        )
+                        // Retain support for older pages that used the
+                        // root-relative /Coralie/v2/host.js URL.
+                        .addPathHandler(
+                            CORALIE_HOST_ROOT_PATH_PREFIX,
+                            coralieHostPathHandler,
                         )
                         .addPathHandler(
                             "/assets/",

@@ -53,7 +53,23 @@ internal class CoralieHostPathHandler :
     }
 }
 
-internal const val CORALIE_HOST_PATH_PREFIX =
+/**
+ * Used by pages containing:
+ *
+ *     <script src="./Coralie/v2/host.js"></script>
+ *
+ * A page loaded from `/cache/<page>.html` resolves that relative URL beneath
+ * `/cache/`.
+ */
+internal const val CORALIE_HOST_CACHE_PATH_PREFIX =
+    "/cache/Coralie/v2/"
+
+/**
+ * Compatibility route for pages that still use:
+ *
+ *     <script src="/Coralie/v2/host.js"></script>
+ */
+internal const val CORALIE_HOST_ROOT_PATH_PREFIX =
     "/Coralie/v2/"
 
 private const val CORALIE_HOST_SCRIPT_NAME =
