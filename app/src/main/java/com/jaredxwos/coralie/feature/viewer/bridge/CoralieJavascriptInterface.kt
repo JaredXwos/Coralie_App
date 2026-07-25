@@ -10,35 +10,19 @@ import com.jaredxwos.coralie.data.space.SpaceKeyValueStore
 import com.jaredxwos.coralie.feature.viewer.runtime.timer.AppTimers
 import com.jaredxwos.coralie.feature.viewer.runtime.permission.PermissionRejectedException
 import com.jaredxwos.coralie.feature.viewer.runtime.ViewerSession
-import com.jaredxwos.coralie.feature.viewer.runtime.http.ResponseTooLargeException
-import com.jaredxwos.coralie.feature.viewer.runtime.http.proxyHttpRequest
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.runBlocking
-import kotlinx.serialization.SerializationException
-import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonNull
-import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.contentOrNull
-import kotlinx.serialization.json.intOrNull
-import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
-import java.io.IOException
-import java.net.SocketTimeoutException
-import java.net.UnknownHostException
 import java.util.UUID
-import java.util.concurrent.atomic.AtomicLong
-import javax.net.ssl.SSLException
-import androidx.core.net.toUri
 
 /**
- * Android implementation of the page-facing `window.Coralie` object.
+ * Private Android implementation exposed to JavaScript as `CoralieNative`.
  *
- * Every protected operation asks its ViewerSession to authorize the required
- * capability. User rejection is rethrown to JavaScript; non-permission HTTP
- * failures continue to return structured status-599 diagnostics.
+ * `/Coralie/v2/host.js` wraps this object and publishes the page-facing
+ * `window.Coralie` API. HTTP is started here without blocking the JavaScript
+ * bridge thread; completion is delivered through `coralie:httpResult`.
  */
 class CoralieJavascriptInterface(
     private val session: ViewerSession,
@@ -216,220 +200,33 @@ class CoralieJavascriptInterface(
     }
 
     // ---------------------------------------------------------------------
-    // HTTP. Objects cannot cross addJavascriptInterface directly, so request
-    // and response objects are encoded as JSON strings.
+    // HTTP. The JavaScript facade creates the request ID and Promise before
+    // calling this non-blocking starter, preventing completion races.
     // ---------------------------------------------------------------------
 
     @JavascriptInterface
-    fun httpRequestJson(requestJson: String): String {
-        val requestId = HTTP_REQUEST_IDS.getAndIncrement()
-        val startedAt = SystemClock.elapsedRealtime()
-
-        var stage = "parse-request"
-        var method = "UNKNOWN"
-        var safeUrl = "(unparsed)"
-        var headerNames: List<String> = emptyList()
-        var requestBodyBytes = 0
-
-        return try {
-            stage = "capability-check"
-            authorizeCapability(
-                PageCapability.HTTP,
-                "httpRequestJson",
-            )
-
-            stage = "parse-request"
-            val params = Json.parseToJsonElement(requestJson)
-            val requestObject = params.jsonObject
-
-            val rawUrl = requestObject["url"]
-                ?.jsonPrimitive
-                ?.contentOrNull
-                ?: throw IllegalArgumentException(
-                    "request.url must be a string"
-                )
-
-            method = requestObject["method"]
-                ?.jsonPrimitive
-                ?.contentOrNull
-                ?.uppercase()
-                ?: "GET"
-
-            safeUrl = safeUrlForLog(rawUrl)
-
-            headerNames =
-                (requestObject["headers"] as? JsonObject)
-                    ?.keys
-                    ?.sortedBy { it.lowercase() }
-                    ?: emptyList()
-
-            requestBodyBytes =
-                requestObject["body"]
-                    ?.takeUnless { it is JsonNull }
-                    ?.jsonPrimitive
-                    ?.contentOrNull
-                    ?.toByteArray(Charsets.UTF_8)
-                    ?.size
-                    ?: 0
-
-            Log.i(
-                TAG,
-                buildString {
-                    append("http.start")
-                    append(" id=").append(requestId)
-                    append(" method=").append(method)
-                    append(" url=").append(safeUrl)
-                    append(" headers=").append(headerNames)
-                    append(" bodyBytes=").append(requestBodyBytes)
-                    append(" thread=").append(Thread.currentThread().name)
-                },
-            )
-
-            stage = "native-proxy"
-            val response = runBlocking {
-                // @JavascriptInterface methods already run off the Android UI
-                // thread. NativeHttpProxy uses thread-safe StateFlow for permission
-                // prompts and Dispatchers.IO for the network request, so moving
-                // the whole operation onto Main would freeze Compose/WebView UI.
-                proxyHttpRequest(params) { domain ->
-                    session.authorizeDomain(
-                        domain = domain,
-                        operation = "httpRequestJson",
-                    )
-                }
-            }
-
-            stage = "validate-response"
-            val responseObject = response.jsonObject
-            val status =
-                responseObject["status"]
-                    ?.jsonPrimitive
-                    ?.intOrNull
-            val statusText =
-                responseObject["statusText"]
-                    ?.jsonPrimitive
-                    ?.contentOrNull
-                    .orEmpty()
-            val responseBodyBytes =
-                responseObject["body"]
-                    ?.jsonPrimitive
-                    ?.contentOrNull
-                    ?.toByteArray(Charsets.UTF_8)
-                    ?.size
-                    ?: 0
-            val contentType =
-                (responseObject["headers"] as? JsonObject)
-                    ?.entries
-                    ?.firstOrNull {
-                        it.key.equals(
-                            "content-type",
-                            ignoreCase = true,
-                        )
-                    }
-                    ?.value
-                    ?.jsonPrimitive
-                    ?.contentOrNull
-                    ?.take(120)
-
-            val elapsedMs =
-                SystemClock.elapsedRealtime() - startedAt
-
-            val completionMessage = buildString {
-                append("http.finish")
-                append(" id=").append(requestId)
-                append(" method=").append(method)
-                append(" url=").append(safeUrl)
-                append(" status=").append(status ?: "missing")
-                append(" statusText=").append(
-                    oneLine(statusText, 100)
-                )
-                append(" elapsedMs=").append(elapsedMs)
-                append(" responseBodyBytes=").append(
-                    responseBodyBytes,
-                )
-                if (!contentType.isNullOrBlank()) {
-                    append(" contentType=").append(contentType)
-                }
-            }
-
-            if (status != null && status in 200..399) {
-                Log.i(TAG, completionMessage)
-            } else {
-                Log.w(TAG, completionMessage)
-            }
-
-            response.toString()
-        } catch (error: PermissionRejectedException) {
-            val elapsedMs =
-                SystemClock.elapsedRealtime() - startedAt
-            Log.w(
-                TAG,
-                "http.rejected " +
-                    "id=$requestId " +
-                    "stage=$stage " +
-                    "scope=${error.scope.name.lowercase()} " +
-                    "target=${oneLine(error.target, 160)} " +
-                    "operation=${error.operation} " +
-                    "elapsedMs=$elapsedMs",
-            )
-            // Do not convert a user rejection into status 599. Throwing makes
-            // `await Coralie.httpRequestJson(...)` reject, matching browser
-            // fetch/network rejection semantics.
-            throw error
-        } catch (error: Exception) {
-            val elapsedMs =
-                SystemClock.elapsedRealtime() - startedAt
-            val category = classifyHttpFailure(error)
-            val root = rootCause(error)
-
-            Log.e(
-                TAG,
-                buildString {
-                    append("http.fail")
-                    append(" id=").append(requestId)
-                    append(" stage=").append(stage)
-                    append(" category=").append(category)
-                    append(" method=").append(method)
-                    append(" url=").append(safeUrl)
-                    append(" elapsedMs=").append(elapsedMs)
-                    append(" requestChars=").append(
-                        requestJson.length,
-                    )
-                    append(" headerNames=").append(headerNames)
-                    append(" requestBodyBytes=").append(
-                        requestBodyBytes,
-                    )
-                    append(" exception=").append(
-                        error.javaClass.name,
-                    )
-                    append(" rootException=").append(
-                        root.javaClass.name,
-                    )
-                    append(" message=").append(
-                        oneLine(
-                            error.message
-                                ?: root.message
-                                ?: "(no message)",
-                            400,
-                        ),
-                    )
-                    append(" causeChain=").append(
-                        causeChain(error),
-                    )
-                },
-                error,
-            )
-
-            nativeHttpFailureResponse(
+    fun httpRequestStart(
+        requestId: String,
+        requestJson: String,
+    ) {
+        loggedCall(
+            operation = "httpRequestStart",
+            details =
+                "id=${oneLine(requestId, 128)} " +
+                    "requestChars=${requestJson.length}",
+        ) {
+            session.startHttpRequest(
                 requestId = requestId,
-                stage = stage,
-                category = category,
-                method = method,
-                safeUrl = safeUrl,
-                elapsedMs = elapsedMs,
-                error = error,
+                requestJson = requestJson,
             )
         }
+    }
+
+    @JavascriptInterface
+    fun httpRequestCancel(
+        requestId: String,
+    ) {
+        session.cancelHttpRequest(requestId)
     }
 
     // ---------------------------------------------------------------------
@@ -588,149 +385,37 @@ class CoralieJavascriptInterface(
         }
     }
 
-    /**
-     * Keep native HTTP exceptions from crossing addJavascriptInterface. Status
-     * 599 is outside the normal HTTP range and is handled by the page as a
-     * native transport failure.
-     */
-    private fun nativeHttpFailureResponse(
-        requestId: Long,
-        stage: String,
-        category: String,
-        method: String,
-        safeUrl: String,
-        elapsedMs: Long,
-        error: Exception,
-    ): String {
-        val root = rootCause(error)
-        val message =
-            error.message
-                ?.takeIf { it.isNotBlank() }
-                ?: root.message
-                    ?.takeIf { it.isNotBlank() }
-                ?: error.javaClass.simpleName
-
-        return buildJsonObject {
-            put("status", 599)
-            put(
-                "statusText",
-                if (category == "response-too-large") {
-                    "Native response too large"
-                } else {
-                    "Native HTTP failure"
-                },
-            )
-            put("headers", buildJsonObject {})
-            put(
-                "body",
-                buildJsonObject {
-                    put("requestId", requestId)
-                    put("stage", stage)
-                    put("category", category)
-                    put("method", method)
-                    put("url", safeUrl)
-                    put("elapsedMs", elapsedMs)
-                    put("message", oneLine(message, 800))
-                    put(
-                        "exception",
-                        error.javaClass.name,
-                    )
-                    put(
-                        "rootException",
-                        root.javaClass.name,
-                    )
-                    put(
-                        "causeChain",
-                        causeChain(error),
-                    )
-
-                    findResponseTooLarge(error)
-                        ?.let { oversized ->
-                            put(
-                                "limitBytes",
-                                oversized.limitBytes,
-                            )
-                            put(
-                                "observedBytes",
-                                oversized.observedBytes,
-                            )
-                            put(
-                                "declaredByServer",
-                                oversized.declaredByServer,
-                            )
-                        }
-                }.toString(),
-            )
-        }.toString()
-    }
-
-    private fun classifyHttpFailure(
-        error: Throwable,
-    ): String {
-        val root = rootCause(error)
-        return when (root) {
-            is ResponseTooLargeException ->
-                "response-too-large"
-            is CancellationException -> "cancelled"
-            is SocketTimeoutException -> "timeout"
-            is UnknownHostException -> "dns"
-            is SSLException -> "tls"
-            is SecurityException -> "security"
-            is SerializationException -> "invalid-json"
-            is IllegalArgumentException -> "invalid-request"
-            is IllegalStateException -> "invalid-state"
-            is IOException -> "network-io"
-            else -> "internal"
-        }
-    }
-
-    private fun findResponseTooLarge(
-        error: Throwable,
-    ): ResponseTooLargeException? =
-        generateSequence(error) { it.cause }
-            .take(MAX_CAUSE_DEPTH)
-            .filterIsInstance<ResponseTooLargeException>()
-            .firstOrNull()
-
-    private fun rootCause(
-        error: Throwable,
-    ): Throwable =
-        generateSequence(error) { it.cause }
-            .take(MAX_CAUSE_DEPTH)
-            .last()
-
     private fun causeChain(
         error: Throwable,
     ): String =
-        generateSequence(error) { it.cause }
+        generateSequence(error) {
+            it.cause
+        }
             .take(MAX_CAUSE_DEPTH)
             .joinToString(" <- ") {
                 buildString {
-                    append(it.javaClass.simpleName)
-                    val message = it.message
-                    if (!message.isNullOrBlank()) {
+                    append(
+                        it.javaClass
+                            .simpleName,
+                    )
+
+                    val message =
+                        it.message
+
+                    if (
+                        !message
+                            .isNullOrBlank()
+                    ) {
                         append(": ")
-                        append(oneLine(message, 240))
+                        append(
+                            oneLine(
+                                message,
+                                240,
+                            ),
+                        )
                     }
                 }
             }
-
-    private fun safeUrlForLog(
-        rawUrl: String,
-    ): String {
-        val uri = rawUrl.toUri()
-        val scheme = uri.scheme ?: "(no-scheme)"
-        val host = uri.host ?: "(no-host)"
-        val port =
-            if (uri.port >= 0) ":${uri.port}" else ""
-        val path =
-            uri.encodedPath
-                ?.takeIf { it.isNotBlank() }
-                ?: "/"
-
-        // Query parameters can contain cursors, tokens, or user data.
-        return "$scheme://$host$port$path"
-    }
 
     private fun safeStorageKey(
         key: String,
@@ -756,13 +441,11 @@ class CoralieJavascriptInterface(
             .take(maxLength)
 
     private companion object {
-        const val TAG = "CoralieJsInterface"
+        const val TAG =
+            "CoralieJsInterface"
         const val MAX_CAUSE_DEPTH = 8
 
         val PUBKEY_REGEX =
             Regex("^[0-9a-fA-F]{64}$")
-
-        val HTTP_REQUEST_IDS =
-            AtomicLong(1)
     }
 }

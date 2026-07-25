@@ -8,6 +8,7 @@ import com.jaredxwos.coralie.data.library.model.PageCapability
 import com.jaredxwos.coralie.data.library.PageLibrary
 import com.jaredxwos.coralie.data.permission.DomainPermissionStore
 import com.jaredxwos.coralie.data.space.SpaceKeyValueStore
+import com.jaredxwos.coralie.feature.viewer.runtime.http.AsyncHttpRequestDispatcher
 import com.jaredxwos.coralie.feature.viewer.runtime.mesh.AppMesh
 import com.jaredxwos.coralie.feature.viewer.runtime.timer.AppTimers
 import com.jaredxwos.coralie.feature.viewer.runtime.permission.CapabilityPermissionPrompt
@@ -76,6 +77,18 @@ class ViewerSession internal constructor(
 
     private val emitterRef =
         AtomicReference<CoralieEventEmitter?>(null)
+
+    private val httpDispatcherDelegate =
+        lazy(
+            LazyThreadSafetyMode.SYNCHRONIZED,
+        ) {
+            AsyncHttpRequestDispatcher(
+                session = this,
+                scope = scope,
+            )
+        }
+    private val httpDispatcher by
+        httpDispatcherDelegate
 
     private val activationGate = Mutex()
     private val permissionGate = Mutex()
@@ -311,6 +324,75 @@ class ViewerSession internal constructor(
         }
     }
 
+    internal fun startHttpRequest(
+        requestId: String,
+        requestJson: String,
+    ) {
+        checkOpen()
+        httpDispatcher.start(
+            requestId = requestId,
+            requestJson = requestJson,
+        )
+    }
+
+    internal fun cancelHttpRequest(
+        requestId: String,
+    ): Boolean =
+        if (closed.get()) {
+            false
+        } else {
+            httpDispatcher.cancel(
+                requestId,
+            )
+        }
+
+    internal fun emitHttpSuccess(
+        requestId: String,
+        responseJson: String,
+    ) {
+        emitterRef.get()
+            ?.emitHttpSuccess(
+                requestId =
+                    requestId,
+                responseJson =
+                    responseJson,
+            )
+            ?: Log.w(
+                TAG,
+                "http.result.drop " +
+                    "id=$requestId " +
+                    "reason=emitter-unavailable",
+            )
+    }
+
+    internal fun emitHttpFailure(
+        requestId: String,
+        errorName: String,
+        message: String,
+        scope: String? = null,
+        target: String? = null,
+        operation: String? = null,
+    ) {
+        emitterRef.get()
+            ?.emitHttpFailure(
+                requestId =
+                    requestId,
+                errorName =
+                    errorName,
+                message = message,
+                scope = scope,
+                target = target,
+                operation =
+                    operation,
+            )
+            ?: Log.w(
+                TAG,
+                "http.result.drop " +
+                    "id=$requestId " +
+                    "reason=emitter-unavailable",
+            )
+    }
+
     fun resolvePermissionPrompt(
         decision: PermissionDecision,
     ) {
@@ -405,6 +487,13 @@ class ViewerSession internal constructor(
             )
         ) {
             return
+        }
+
+        if (
+            httpDispatcherDelegate
+                .isInitialized()
+        ) {
+            httpDispatcher.close()
         }
 
         pendingDecision?.complete(

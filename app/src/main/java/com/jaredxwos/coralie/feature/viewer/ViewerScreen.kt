@@ -153,7 +153,7 @@ fun ViewerScreen(
                 ?.let { webView ->
                     webView.stopLoading()
                     webView.removeJavascriptInterface(
-                        "Coralie",
+                        "CoralieNative",
                     )
                     webView.destroy()
                 }
@@ -547,11 +547,14 @@ private fun PageWebView(
                 settings
                     .applySecurityModifiers()
 
+                // The raw Java object remains an implementation detail.
+                // /Coralie/v2/host.js exposes the public Promise-aware
+                // window.Coralie facade.
                 addJavascriptInterface(
                     CoralieJavascriptInterface(
                         session,
                     ),
-                    "Coralie",
+                    "CoralieNative",
                 )
                 session.attachWebView(this)
 
@@ -582,7 +585,7 @@ private fun PageWebView(
                         .Builder()
                         // Relative imports from a cached page resolve under
                         // /cache/. Register this before the general /cache/
-                        // handler so the no-op bootstrap wins.
+                        // handler so the Android host facade wins.
                         .addPathHandler(
                             CORALIE_HOST_CACHE_PATH_PREFIX,
                             coralieHostPathHandler,

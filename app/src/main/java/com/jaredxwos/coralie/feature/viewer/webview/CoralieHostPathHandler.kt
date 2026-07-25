@@ -5,14 +5,13 @@ import androidx.webkit.WebViewAssetLoader
 import java.io.ByteArrayInputStream
 
 /**
- * Virtual Android counterpart of the browser-host build output:
+ * Android counterpart of the browser build output:
  *
- *     /Coralie/v2/host.js
+ *     Coralie/v2/host.js
  *
- * Android already provides the complete `window.Coralie` implementation
- * through `addJavascriptInterface`. The shared page import must nevertheless
- * resolve successfully, so this handler returns an intentionally empty host
- * bootstrap script rather than bundling the browser implementation in the APK.
+ * The raw `CoralieNative` Java bridge cannot return JavaScript Promises.
+ * This virtual script exposes the public `window.Coralie` facade and converts
+ * native HTTP start/result messages into a genuine Promise-based operation.
  */
 internal class CoralieHostPathHandler :
     WebViewAssetLoader.PathHandler {
@@ -25,10 +24,7 @@ internal class CoralieHostPathHandler :
         }
 
         val script =
-            """
-            // Coralie API v2 is supplied natively by Android.
-            // Browser host installation is intentionally skipped.
-            """.trimIndent()
+            ANDROID_CORALIE_HOST_SCRIPT
                 .toByteArray(Charsets.UTF_8)
 
         return WebResourceResponse(
@@ -50,6 +46,245 @@ internal class CoralieHostPathHandler :
             "application/javascript"
         const val HTTP_OK = 200
         const val HTTP_OK_REASON = "OK"
+
+        val ANDROID_CORALIE_HOST_SCRIPT =
+            """
+(() => {
+  "use strict";
+
+  if (window.Coralie !== undefined) {
+    return;
+  }
+
+  const nativeHost = window.CoralieNative;
+  if (nativeHost === undefined || nativeHost === null) {
+    throw new Error(
+      "Android Coralie native host is unavailable",
+    );
+  }
+
+  const pendingHttp = new Map();
+  let requestSequence = 0;
+
+  function nextRequestId() {
+    requestSequence += 1;
+
+    if (
+      globalThis.crypto &&
+      typeof globalThis.crypto.randomUUID === "function"
+    ) {
+      return globalThis.crypto.randomUUID();
+    }
+
+    return (
+      "http-" +
+      Date.now().toString(36) +
+      "-" +
+      requestSequence.toString(36) +
+      "-" +
+      Math.random().toString(36).slice(2)
+    );
+  }
+
+  function rejectionFromDetail(detail) {
+    const error = new Error(
+      detail.message || "Native HTTP request rejected",
+    );
+
+    error.name =
+      detail.errorName || "Error";
+
+    if (detail.scope !== undefined) {
+      error.scope = detail.scope;
+    }
+    if (detail.target !== undefined) {
+      error.target = detail.target;
+    }
+    if (detail.operation !== undefined) {
+      error.operation = detail.operation;
+    }
+
+    return error;
+  }
+
+  window.addEventListener(
+    "coralie:httpResult",
+    (event) => {
+      const detail = event.detail || {};
+      const requestId = String(
+        detail.requestId || "",
+      );
+      const pending =
+        pendingHttp.get(requestId);
+
+      if (!pending) {
+        return;
+      }
+
+      pendingHttp.delete(requestId);
+
+      if (detail.ok === true) {
+        pending.resolve(
+          String(detail.responseJson || ""),
+        );
+        return;
+      }
+
+      pending.reject(
+        rejectionFromDetail(detail),
+      );
+    },
+  );
+
+  function httpRequestJson(requestJson) {
+    const requestId = nextRequestId();
+
+    return new Promise((resolve, reject) => {
+      pendingHttp.set(
+        requestId,
+        { resolve, reject },
+      );
+
+      try {
+        nativeHost.httpRequestStart(
+          requestId,
+          String(requestJson),
+        );
+      } catch (error) {
+        pendingHttp.delete(requestId);
+        reject(error);
+      }
+    });
+  }
+
+  function cancelPendingHttp() {
+    for (
+      const [requestId, pending]
+      of pendingHttp
+    ) {
+      try {
+        nativeHost.httpRequestCancel(
+          requestId,
+        );
+      } catch {
+        // Session shutdown also cancels native work.
+      }
+
+      const error = new Error(
+        "Viewer page was unloaded",
+      );
+      error.name = "AbortError";
+      pending.reject(error);
+    }
+
+    pendingHttp.clear();
+  }
+
+  window.addEventListener(
+    "pagehide",
+    cancelPendingHttp,
+    { once: true },
+  );
+
+  const host = Object.freeze({
+    apiVersion() {
+      return nativeHost.apiVersion();
+    },
+
+    hostKind() {
+      return nativeHost.hostKind();
+    },
+
+    getPubkey() {
+      return nativeHost.getPubkey();
+    },
+
+    addPeer(pubkeyHex) {
+      return nativeHost.addPeer(
+        String(pubkeyHex),
+      );
+    },
+
+    sendMessage(
+      toPubkeyHex,
+      payload,
+    ) {
+      return nativeHost.sendMessage(
+        String(toPubkeyHex),
+        Array.from(payload || []),
+      );
+    },
+
+    getPeersJson() {
+      return nativeHost.getPeersJson();
+    },
+
+    reset() {
+      return nativeHost.reset();
+    },
+
+    close() {
+      return nativeHost.close();
+    },
+
+    storageGetItem(key) {
+      return nativeHost.storageGetItem(
+        String(key),
+      );
+    },
+
+    storageSetItem(key, value) {
+      return nativeHost.storageSetItem(
+        String(key),
+        String(value),
+      );
+    },
+
+    storageRemoveItem(key) {
+      return nativeHost.storageRemoveItem(
+        String(key),
+      );
+    },
+
+    httpRequestJson,
+
+    timerQueue(
+      id,
+      delaySeconds,
+      payload,
+    ) {
+      return nativeHost.timerQueue(
+        id == null ? null : String(id),
+        Number(delaySeconds),
+        payload == null
+          ? null
+          : String(payload),
+      );
+    },
+
+    timerCancel(id) {
+      return nativeHost.timerCancel(
+        String(id),
+      );
+    },
+
+    timerListJson() {
+      return nativeHost.timerListJson();
+    },
+  });
+
+  Object.defineProperty(
+    window,
+    "Coralie",
+    {
+      value: host,
+      writable: false,
+      configurable: false,
+      enumerable: true,
+    },
+  );
+})();
+            """.trimIndent()
     }
 }
 
@@ -57,15 +292,12 @@ internal class CoralieHostPathHandler :
  * Used by pages containing:
  *
  *     <script src="./Coralie/v2/host.js"></script>
- *
- * A page loaded from `/cache/<page>.html` resolves that relative URL beneath
- * `/cache/`.
  */
 internal const val CORALIE_HOST_CACHE_PATH_PREFIX =
     "/cache/Coralie/v2/"
 
 /**
- * Compatibility route for pages that still use:
+ * Compatibility route for pages that use:
  *
  *     <script src="/Coralie/v2/host.js"></script>
  */

@@ -45,6 +45,54 @@ class CoralieEventEmitter(
         }
     }
 
+    fun emitHttpSuccess(
+        requestId: String,
+        responseJson: String,
+    ) {
+        emit(
+            type = "httpResult",
+            data =
+                buildJsonObject {
+                    put("requestId", requestId)
+                    put("ok", true)
+                    put(
+                        "responseJson",
+                        responseJson,
+                    )
+                },
+        )
+    }
+
+    fun emitHttpFailure(
+        requestId: String,
+        errorName: String,
+        message: String,
+        scope: String? = null,
+        target: String? = null,
+        operation: String? = null,
+    ) {
+        emit(
+            type = "httpResult",
+            data =
+                buildJsonObject {
+                    put("requestId", requestId)
+                    put("ok", false)
+                    put("errorName", errorName)
+                    put("message", message)
+
+                    scope?.let {
+                        put("scope", it)
+                    }
+                    target?.let {
+                        put("target", it)
+                    }
+                    operation?.let {
+                        put("operation", it)
+                    }
+                },
+        )
+    }
+
     fun emit(
         type: String,
         data: JsonElement,

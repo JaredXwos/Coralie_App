@@ -1,25 +1,32 @@
 package com.jaredxwos.coralie.feature.viewer.runtime.http
 
 import java.io.ByteArrayOutputStream
+import java.io.IOException
 import java.net.InetAddress
 import java.net.UnknownHostException
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
-import kotlinx.coroutines.Dispatchers
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.withContext
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.encodeToJsonElement
+import okhttp3.Call
+import okhttp3.Callback
 import okhttp3.Dns
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.Response
 import okhttp3.ResponseBody
 import okhttp3.RequestBody.Companion.toRequestBody
 
@@ -41,9 +48,12 @@ data class HttpResponseData(
 
 /**
  * Decodes and performs an HTTPS request after [authorizeDomain] succeeds.
- * Permission rejection is deliberately allowed to throw back to the page.
+ *
+ * [requestId] is shared with the JavaScript Promise and identifies the active
+ * OkHttp Call for immediate cancellation.
  */
 suspend fun proxyHttpRequest(
+    requestId: String,
     params: JsonElement,
     authorizeDomain: suspend (String) -> Unit,
 ): JsonElement {
@@ -62,18 +72,33 @@ suspend fun proxyHttpRequest(
     return try {
         authorizeDomain(url.host)
         Json.encodeToJsonElement(
-            NativeHttpProxy.perform(request, url),
+            NativeHttpProxy.perform(
+                requestId = requestId,
+                request = request,
+                url = url,
+            ),
         )
     } finally {
         NativeHttpProxy.requestFinished()
     }
 }
 
-/** HTTP transport shared by the current viewer session. */
+/**
+ * Asynchronous HTTP transport shared by viewer sessions.
+ *
+ * No JavaScript bridge thread or coroutine IO thread is held while the network
+ * request is in flight. Coroutine/session cancellation immediately cancels the
+ * corresponding OkHttp Call.
+ */
 object NativeHttpProxy {
-    /** Fixed hard ceiling for one decoded native HTTP response body. */
     internal const val MAX_RESPONSE_BYTES =
         64L * 1024L * 1024L // 64 MiB
+
+    internal const val DEFAULT_CALL_TIMEOUT_MILLIS =
+        45_000L
+
+    private const val MAX_CALL_TIMEOUT_MILLIS =
+        5L * 60L * 1000L
 
     private val safeDns = Dns { hostname ->
         Dns.SYSTEM.lookup(hostname)
@@ -92,11 +117,15 @@ object NativeHttpProxy {
             .followSslRedirects(false)
             .connectTimeout(15, TimeUnit.SECONDS)
             .readTimeout(30, TimeUnit.SECONDS)
-            .callTimeout(45, TimeUnit.SECONDS)
             .build()
 
-    private val activeRequestCounter = AtomicInteger(0)
-    private val _activeRequests = MutableStateFlow(0)
+    private val activeCalls =
+        ConcurrentHashMap<String, Call>()
+
+    private val activeRequestCounter =
+        AtomicInteger(0)
+    private val _activeRequests =
+        MutableStateFlow(0)
 
     val activeRequests: StateFlow<Int> =
         _activeRequests.asStateFlow()
@@ -115,67 +144,203 @@ object NativeHttpProxy {
     }
 
     internal suspend fun perform(
+        requestId: String,
         request: HttpRequestParams,
         url: HttpUrl,
-    ): HttpResponseData =
-        withContext(Dispatchers.IO) {
-            val method = request.method.uppercase()
-            val body =
-                if (method == "GET" || method == "HEAD") {
-                    null
-                } else {
-                    (request.body ?: "").toRequestBody(null)
-                }
-
-            val builder =
-                Request.Builder()
-                    .url(url)
-                    .method(method, body)
-            request.headers.forEach { (key, value) ->
-                builder.addHeader(key, value)
-            }
-
-            client.newCall(builder.build())
-                .execute()
-                .use { response ->
-                    HttpResponseData(
-                        status = response.code,
-                        statusText = response.message,
-                        headers =
-                            response.headers
-                                .toMultimap()
-                                .mapValues { (_, values) ->
-                                    values.joinToString(", ")
-                                },
-                        body = readResponseBodyLimited(
-                            body = response.body,
-                            maximumBytes = MAX_RESPONSE_BYTES,
-                        ),
-                    )
-                }
+        timeoutMillis: Long =
+            DEFAULT_CALL_TIMEOUT_MILLIS,
+    ): HttpResponseData {
+        require(requestId.isNotBlank()) {
+            "requestId must not be blank"
+        }
+        require(
+            timeoutMillis in
+                1L..MAX_CALL_TIMEOUT_MILLIS,
+        ) {
+            "timeoutMillis must be between 1 and " +
+                MAX_CALL_TIMEOUT_MILLIS
         }
 
-    /**
-     * Reads the decoded OkHttp response stream without allowing an unbounded
-     * allocation. The declared length is checked first when available, then
-     * the actual stream is counted because gzip/chunked bodies often report -1.
-     */
+        val method = request.method.uppercase()
+        val body =
+            if (
+                method == "GET" ||
+                method == "HEAD"
+            ) {
+                null
+            } else {
+                (request.body ?: "")
+                    .toRequestBody(null)
+            }
+
+        val builder =
+            Request.Builder()
+                .url(url)
+                .method(method, body)
+
+        request.headers.forEach {
+                (key, value) ->
+            builder.addHeader(key, value)
+        }
+
+        val call =
+            client.newCall(builder.build())
+
+        // This is configured per Call rather than globally, allowing future
+        // Android-only callers to choose a narrower timeout without changing
+        // the page/browser interface.
+        call.timeout().timeout(
+            timeoutMillis,
+            TimeUnit.MILLISECONDS,
+        )
+
+        check(
+            activeCalls.putIfAbsent(
+                requestId,
+                call,
+            ) == null,
+        ) {
+            "Duplicate HTTP request ID: $requestId"
+        }
+
+        return try {
+            awaitResponse(call)
+        } finally {
+            activeCalls.remove(
+                requestId,
+                call,
+            )
+        }
+    }
+
+    internal fun cancel(
+        requestId: String,
+    ): Boolean {
+        val call =
+            activeCalls[requestId]
+                ?: return false
+        call.cancel()
+        return true
+    }
+
+    private suspend fun awaitResponse(
+        call: Call,
+    ): HttpResponseData =
+        suspendCancellableCoroutine {
+                continuation ->
+            val completed =
+                AtomicBoolean(false)
+
+            continuation
+                .invokeOnCancellation {
+                    if (
+                        completed.compareAndSet(
+                            false,
+                            true,
+                        )
+                    ) {
+                        call.cancel()
+                    }
+                }
+
+            call.enqueue(
+                object : Callback {
+                    override fun onFailure(
+                        call: Call,
+                        e: IOException,
+                    ) {
+                        if (
+                            completed.compareAndSet(
+                                false,
+                                true,
+                            )
+                        ) {
+                            continuation
+                                .resumeWithException(
+                                    e,
+                                )
+                        }
+                    }
+
+                    override fun onResponse(
+                        call: Call,
+                        response: Response,
+                    ) {
+                        try {
+                            val result =
+                                response.use {
+                                    HttpResponseData(
+                                        status =
+                                            it.code,
+                                        statusText =
+                                            it.message,
+                                        headers =
+                                            it.headers
+                                                .toMultimap()
+                                                .mapValues {
+                                                        (_, values) ->
+                                                    values.joinToString(
+                                                        ", ",
+                                                    )
+                                                },
+                                        body =
+                                            readResponseBodyLimited(
+                                                body =
+                                                    it.body,
+                                                maximumBytes =
+                                                    MAX_RESPONSE_BYTES,
+                                            ),
+                                    )
+                                }
+
+                            if (
+                                completed.compareAndSet(
+                                    false,
+                                    true,
+                                )
+                            ) {
+                                continuation
+                                    .resume(result)
+                            }
+                        } catch (
+                            error: Exception
+                        ) {
+                            if (
+                                completed.compareAndSet(
+                                    false,
+                                    true,
+                                )
+                            ) {
+                                continuation
+                                    .resumeWithException(
+                                        error,
+                                    )
+                            }
+                        }
+                    }
+                },
+            )
+        }
+
     internal fun readResponseBodyLimited(
         body: ResponseBody,
-        maximumBytes: Long = MAX_RESPONSE_BYTES,
+        maximumBytes: Long =
+            MAX_RESPONSE_BYTES,
     ): String {
         require(maximumBytes > 0L) {
             "maximumBytes must be positive"
         }
 
-        val declaredLength = body.contentLength()
+        val declaredLength =
+            body.contentLength()
         if (
             declaredLength >= 0L &&
             declaredLength > maximumBytes
         ) {
             throw ResponseTooLargeException(
                 limitBytes = maximumBytes,
-                observedBytes = declaredLength,
+                observedBytes =
+                    declaredLength,
                 declaredByServer = true,
             )
         }
@@ -186,33 +351,51 @@ object NativeHttpProxy {
                 ?: Charsets.UTF_8
 
         body.byteStream().use { input ->
-            val output = ByteArrayOutputStream()
-            val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+            val output =
+                ByteArrayOutputStream()
+            val buffer =
+                ByteArray(
+                    DEFAULT_BUFFER_SIZE,
+                )
             var totalBytes = 0L
 
             while (true) {
-                val count = input.read(buffer)
+                val count =
+                    input.read(buffer)
                 if (count == -1) {
                     break
                 }
 
                 totalBytes += count
-                if (totalBytes > maximumBytes) {
+                if (
+                    totalBytes >
+                    maximumBytes
+                ) {
                     throw ResponseTooLargeException(
-                        limitBytes = maximumBytes,
-                        observedBytes = totalBytes,
-                        declaredByServer = false,
+                        limitBytes =
+                            maximumBytes,
+                        observedBytes =
+                            totalBytes,
+                        declaredByServer =
+                            false,
                     )
                 }
 
-                output.write(buffer, 0, count)
+                output.write(
+                    buffer,
+                    0,
+                    count,
+                )
             }
 
-            return output.toByteArray().toString(charset)
+            return output
+                .toByteArray()
+                .toString(charset)
         }
     }
 
-    private fun InetAddress.isPubliclyRoutable(): Boolean {
+    private fun InetAddress
+        .isPubliclyRoutable(): Boolean {
         if (
             isLoopbackAddress ||
             isAnyLocalAddress ||
@@ -226,14 +409,17 @@ object NativeHttpProxy {
         val bytes = address
         if (
             bytes.size == 16 &&
-            (bytes[0].toInt() and 0xfe) == 0xfc
+            (bytes[0].toInt() and 0xfe) ==
+            0xfc
         ) {
             return false
         }
         if (
             bytes.size == 4 &&
-            (bytes[0].toInt() and 0xff) == 100 &&
-            (bytes[1].toInt() and 0xc0) == 64
+            (bytes[0].toInt() and 0xff) ==
+            100 &&
+            (bytes[1].toInt() and 0xc0) ==
+            64
         ) {
             return false
         }
