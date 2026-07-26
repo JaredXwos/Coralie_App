@@ -1,9 +1,9 @@
 # Privacy Policy for Coralie
 
-**Effective date:** [DD Month YYYY]  
-**Last updated:** [DD Month YYYY]
+**Effective date:** [26 July 2026]  
+**Last updated:** [26 July 2026]
 
-Coralie is an Android application developed and published by **[Developer name exactly as shown on Google Play]** (“the developer”, “we”, “us”, or “our”).
+Coralie is an Android application developed and published by **[Jared Xwos]** (“the developer”, “we”, “us”, or “our”).
 
 This Privacy Policy explains how Coralie handles information when you install and use the application.
 
@@ -223,8 +223,8 @@ The revised policy will show a new “Last updated” date. Material changes may
 
 For privacy questions, requests, or concerns relating to Coralie, contact:
 
-**Developer:** [Developer name exactly as shown on Google Play]  
-**Email:** [Privacy contact email]  
+**Developer:** [Jared Xwos]  
+**Email:** [jaredxwos@gmail.com]  
 **Country or region:** Singapore
 
 When contacting us, describe the issue and identify the relevant Coralie version where possible.
