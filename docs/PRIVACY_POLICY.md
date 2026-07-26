@@ -1,3 +1,9 @@
+---
+layout: default
+title: Privacy Policy
+permalink: /privacy-policy/
+---
+
 # Privacy Policy for Coralie
 
 **Effective date:** [26 July 2026]  
