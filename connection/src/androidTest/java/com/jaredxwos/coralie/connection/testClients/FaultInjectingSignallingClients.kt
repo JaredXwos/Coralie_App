@@ -38,10 +38,6 @@ class FakeNostrSignallingClient(
         closed = true
         inboundChannel.close()
     }
-
-    suspend fun deliverInbound(fromPubkey: String, plaintext: String) {
-        inboundChannel.send(InboundMessage(fromPubkey, plaintext))
-    }
 }
 
 class DropFirstNSignallingClient(
