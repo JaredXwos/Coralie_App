@@ -59,9 +59,9 @@ import org.webrtc.PeerConnectionFactory
  * that cascade, though — it explicitly closes every tracked initiator/link itself,
  * since sibling scopes don't cancel each other.
  *
- * Every mutation of [initiating] and [_connected] happens only from coroutines running
+ * Every mutation of [initiating], [answering], and [_connected] happens only from coroutines running
  * on [dispatcher] (single-thread confinement, same convention :transport's LiveRtcContext
- * uses per connection). Every private function that touches either collection is
+ * uses per connection). Every private function that touches those collections is
  * non-suspend and runs to completion before yielding, so the check-then-act guards
  * (e.g. onInboundOffer's two-step gate) are race-free with no explicit locking.
  */
@@ -88,6 +88,7 @@ class LiveConnectionManager(
 
     // -- state; touched only from coroutines running on `dispatcher` --
     private val initiating = mutableMapOf<String, InitiationAttempt>()
+    private val answering = mutableMapOf<String, PeerLink>()
     private val _connected = MutableStateFlow<Map<String, PeerLink>>(emptyMap())
 
     private val _incomingMessages = MutableSharedFlow<PeerMessage>(extraBufferCapacity = 64)
@@ -138,6 +139,7 @@ class LiveConnectionManager(
     override fun close() {
         scope.cancel()
         initiating.values.forEach { it.initiator.close() }
+        answering.values.forEach { it.close() }
         _connected.value.values.forEach { it.close() }
         signalling.close()
         _terminalFailures.close()
@@ -158,7 +160,7 @@ class LiveConnectionManager(
     // ------------------------------------------------------------------
     private fun onNewPeerLearned(pubkeyHex: String) {
         if (pubkeyHex == myPubkeyHex) return
-        if (pubkeyHex in initiating || pubkeyHex in _connected.value) return
+        if (pubkeyHex in initiating || pubkeyHex in answering || pubkeyHex in _connected.value) return
 
         val initiator = createInitiator()
         val watcherJob = watchLinkState(pubkeyHex, initiator)
@@ -206,36 +208,48 @@ class LiveConnectionManager(
         sendOffer(pubkeyHex, fresh)
     }
 
-    // §6.8 — reached identically by an Initiator (removes the `initiating`
-    // entry) or an Answerer (nothing to remove — a harmless no-op).
+    // Reached identically by an Initiator or an Answerer. Identity checks
+    // prevent a stale duplicate negotiation from replacing an already-live link.
     private fun onLinkConnected(pubkeyHex: String, link: PeerLink) {
-        initiating.remove(pubkeyHex)
+        val existing = _connected.value[pubkeyHex]
+        if (existing != null && existing !== link) {
+            if (initiating[pubkeyHex]?.initiator === link) initiating.remove(pubkeyHex)
+            if (answering[pubkeyHex] === link) answering.remove(pubkeyHex)
+            link.close()
+            return
+        }
+
+        if (initiating[pubkeyHex]?.initiator === link) initiating.remove(pubkeyHex)
+        if (answering[pubkeyHex] === link) answering.remove(pubkeyHex)
         _connected.update { it + (pubkeyHex to link) }
         launchFrameReader(pubkeyHex, link)
         broadcastAnnounce(pubkeyHex)
     }
 
-    // One watcher per link, either role — dispatches on current map
-    // membership, not on which role created the link (§6.5/§6.8/§6.12).
-    // Deliberately does NOT cancel on Connected: this same job has to stay
-    // alive to observe a later Closed/Failed when the peer eventually departs.
-    // Only genuinely terminal states end this watcher's life.
+    // One watcher per link. Identity checks are important because a stale link
+    // may fail after a newer link for the same pubkey has already connected.
     private fun watchLinkState(pubkeyHex: String, link: PeerLink): Job = scope.launch {
         link.state.collect { state ->
             when (state) {
-                LinkState.Connected -> {
-                    onLinkConnected(pubkeyHex, link)
-                }
+                LinkState.Connected -> onLinkConnected(pubkeyHex, link)
                 LinkState.HandshakeTimedOut, LinkState.Failed -> {
-                    if (pubkeyHex in initiating) {
-                        onAttemptFailed(pubkeyHex)
-                    } else if (pubkeyHex in _connected.value) {
-                        _connected.update { it - pubkeyHex }
+                    when {
+                        initiating[pubkeyHex]?.initiator === link -> onAttemptFailed(pubkeyHex)
+                        answering[pubkeyHex] === link -> {
+                            answering.remove(pubkeyHex)
+                            link.close()
+                        }
+                        _connected.value[pubkeyHex] === link -> {
+                            _connected.update { it - pubkeyHex }
+                        }
                     }
                     cancel()
                 }
                 LinkState.Closed -> {
-                    if (pubkeyHex in _connected.value) _connected.update { it - pubkeyHex }
+                    if (answering[pubkeyHex] === link) answering.remove(pubkeyHex)
+                    if (_connected.value[pubkeyHex] === link) {
+                        _connected.update { it - pubkeyHex }
+                    }
                     cancel()
                 }
                 LinkState.New, is LinkState.AwaitingRemoteDescription, LinkState.Connecting -> Unit
@@ -248,7 +262,13 @@ class LiveConnectionManager(
         val frame = Json.encodeToString<DataChannelFrame>(DataChannelFrame.Announce(newPeerPubkeyHex))
             .encodeToByteArray()
         _connected.value.forEach { (pubkeyHex, link) ->
-            if (pubkeyHex != newPeerPubkeyHex) scope.launch { link.send(frame) }
+            if (pubkeyHex != newPeerPubkeyHex) {
+                scope.launch {
+                    link.send(frame).onFailure { cause ->
+                        logWarning("failed to announce $newPeerPubkeyHex to $pubkeyHex", cause)
+                    }
+                }
+            }
         }
     }
 
@@ -285,11 +305,23 @@ class LiveConnectionManager(
         }
     }
 
-    // §6.3 — two guards, in order: already-connected (unconditional), then
-    // the global open/closed gate.
+    // Accept offers independently per peer. When both sides initiate the same
+    // pair, the lexicographically smaller pubkey remains the initiator and the
+    // larger pubkey abandons its attempt and answers. Initiations to unrelated
+    // peers must never block this offer.
     private fun onInboundOffer(fromPubkeyHex: String, offer: SessionDescriptionData) {
         if (fromPubkeyHex in _connected.value) return
-        if (initiating.isNotEmpty()) return
+        if (fromPubkeyHex in answering) return
+
+        val localAttempt = initiating[fromPubkeyHex]
+        if (localAttempt != null) {
+            val iAmDesignatedInitiator = myPubkeyHex < fromPubkeyHex
+            if (iAmDesignatedInitiator) return
+
+            initiating.remove(fromPubkeyHex)
+            localAttempt.watcherJob.cancel()
+            localAttempt.initiator.close()
+        }
 
         val answerer = getAnswerer(
             factory = peerConnectionFactory,
@@ -298,10 +330,21 @@ class LiveConnectionManager(
             offer = offer,
             clock = clock,
         )
+        answering[fromPubkeyHex] = answerer
         watchLinkState(fromPubkeyHex, answerer)
         scope.launch {
-            val answer = answerer.createAnswer()
-            signalling.send(fromPubkeyHex, Json.encodeToString(answer))
+            runCatching {
+                val answer = answerer.createAnswer()
+                check(signalling.send(fromPubkeyHex, Json.encodeToString(answer))) {
+                    "all relays rejected answer for $fromPubkeyHex"
+                }
+            }.onFailure { cause ->
+                if (answering[fromPubkeyHex] === answerer) {
+                    answering.remove(fromPubkeyHex)
+                    answerer.close()
+                }
+                logWarning("failed to answer offer from $fromPubkeyHex", cause)
+            }
         }
     }
 
