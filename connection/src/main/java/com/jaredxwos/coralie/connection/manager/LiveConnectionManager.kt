@@ -47,7 +47,7 @@ import org.webrtc.PeerConnectionFactory
  *
  * Calls `:transport`'s `getInitiator()`/`getAnswerer()` directly — deliberately, with
  * no injectable seam in between (see design doc §3b/§7). Consequence: the retry,
- * glare-resolution, and gossip logic below can't be exercised as plain JVM unit tests
+ * offer-handling, and gossip logic below can't be exercised as plain JVM unit tests
  * against a fake transport; testing it requires a real or instrumented
  * `PeerConnectionFactory`.
  *
@@ -63,7 +63,7 @@ import org.webrtc.PeerConnectionFactory
  * on [dispatcher] (single-thread confinement, same convention :transport's LiveRtcContext
  * uses per connection). Every private function that touches either collection is
  * non-suspend and runs to completion before yielding, so the check-then-act guards
- * (e.g. onInboundOffer's two-step gate) are race-free with no explicit locking.
+ * (e.g. onInboundOffer's per-peer gates) are race-free with no explicit locking.
  */
 class LiveConnectionManager(
     private val parentScope: CoroutineScope,
@@ -87,8 +87,13 @@ class LiveConnectionManager(
     )
 
     // -- state; touched only from coroutines running on `dispatcher` --
+    private data class AnsweringAttempt(
+        val link: PeerLink,
+        val offer: SessionDescriptionData,
+    )
+
     private val initiating = mutableMapOf<String, InitiationAttempt>()
-    private val answering = mutableMapOf<String, PeerLink>()
+    private val answering = mutableMapOf<String, AnsweringAttempt>()
     private val _connected = MutableStateFlow<Map<String, PeerLink>>(emptyMap())
 
     private val _incomingMessages = MutableSharedFlow<PeerMessage>(extraBufferCapacity = 64)
@@ -139,7 +144,7 @@ class LiveConnectionManager(
     override fun close() {
         scope.cancel()
         initiating.values.forEach { it.initiator.close() }
-        answering.values.forEach { it.close() }
+        answering.values.forEach { it.link.close() }
         _connected.value.values.forEach { it.close() }
         signalling.close()
         _terminalFailures.close()
@@ -218,7 +223,7 @@ class LiveConnectionManager(
         }
 
         if (initiating[pubkeyHex]?.initiator === link) initiating.remove(pubkeyHex)
-        if (answering[pubkeyHex] === link) answering.remove(pubkeyHex)
+        if (answering[pubkeyHex]?.link === link) answering.remove(pubkeyHex)
         _connected.update { it + (pubkeyHex to link) }
         launchFrameReader(pubkeyHex, link)
         broadcastAnnounce(pubkeyHex)
@@ -238,7 +243,7 @@ class LiveConnectionManager(
                     when {
                         initiating[pubkeyHex]?.initiator === link ->
                             onAttemptFailed(pubkeyHex)
-                        answering[pubkeyHex] === link -> {
+                        answering[pubkeyHex]?.link === link -> {
                             answering.remove(pubkeyHex)
                             link.close()
                         }
@@ -250,7 +255,7 @@ class LiveConnectionManager(
                     cancel()
                 }
                 LinkState.Closed -> {
-                    if (answering[pubkeyHex] === link) answering.remove(pubkeyHex)
+                    if (answering[pubkeyHex]?.link === link) answering.remove(pubkeyHex)
                     if (_connected.value[pubkeyHex] === link) {
                         _connected.update { current ->
                             if (current[pubkeyHex] === link) current - pubkeyHex else current
@@ -312,7 +317,16 @@ class LiveConnectionManager(
     private fun onInboundOffer(fromPubkeyHex: String, offer: SessionDescriptionData) {
         if (fromPubkeyHex in _connected.value) return
         if (fromPubkeyHex in initiating) return
-        if (fromPubkeyHex in answering) return
+
+        val existing = answering[fromPubkeyHex]
+        if (existing != null) {
+            // An exact repeat is a duplicate relay delivery. A different SDP is a
+            // fresh initiator retry and must replace the unfinished answerer;
+            // otherwise every retry is ignored until the first answerer times out.
+            if (existing.offer == offer) return
+            answering.remove(fromPubkeyHex)
+            existing.link.close()
+        }
 
         val answerer = getAnswerer(
             factory = peerConnectionFactory,
@@ -321,18 +335,24 @@ class LiveConnectionManager(
             offer = offer,
             clock = clock,
         )
-        answering[fromPubkeyHex] = answerer
+        val attempt = AnsweringAttempt(link = answerer, offer = offer)
+        answering[fromPubkeyHex] = attempt
         watchLinkState(fromPubkeyHex, answerer)
         scope.launch {
             runCatching {
                 val answer = answerer.createAnswer()
+
+                // createAnswer() suspends. A newer retry offer may have replaced
+                // this answerer while it was running, in which case its answer is stale.
+                if (answering[fromPubkeyHex] !== attempt) return@runCatching
+
                 val accepted = signalling.send(fromPubkeyHex, Json.encodeToString(answer))
-                if (!accepted && answering[fromPubkeyHex] === answerer) {
+                if (!accepted && answering[fromPubkeyHex] === attempt) {
                     answering.remove(fromPubkeyHex)
                     answerer.close()
                 }
             }.onFailure { cause ->
-                if (answering[fromPubkeyHex] === answerer) {
+                if (answering[fromPubkeyHex] === attempt) {
                     answering.remove(fromPubkeyHex)
                     answerer.close()
                 }
