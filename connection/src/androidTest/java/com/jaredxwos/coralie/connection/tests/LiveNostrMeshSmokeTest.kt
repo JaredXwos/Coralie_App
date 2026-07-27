@@ -37,7 +37,7 @@ import kotlin.time.Duration.Companion.seconds
  * End-to-end gossip test using the production public Nostr relays and the real
  * Android WebRTC transport.
  *
- * This is intentionally separate from [GossipMeshTest]: that test keeps Nostr
+ * This is intentionally separate from [ConnectionManagerGossipTest]: that test keeps Nostr
  * signalling deterministic and in-process, whereas this test exercises:
  *
  *  - real WebSocket connections to [PublicMeshEndpoints.relayUrls]
@@ -55,7 +55,7 @@ import kotlin.time.Duration.Companion.seconds
  * requires internet access and currently reachable public Nostr relays.
  */
 @RunWith(AndroidJUnit4::class)
-class LiveNostrGossipTest {
+class LiveNostrMeshSmokeTest {
 
     @Test
     fun publicRelayGossipCreatesUsablePeerConnection() {

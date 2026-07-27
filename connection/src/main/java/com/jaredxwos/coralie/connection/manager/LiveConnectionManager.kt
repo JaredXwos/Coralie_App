@@ -61,7 +61,7 @@ import org.webrtc.PeerConnectionFactory
  *
  * Every mutation of [initiating], [answering], and [_connected] happens only from coroutines running
  * on [dispatcher] (single-thread confinement, same convention :transport's LiveRtcContext
- * uses per connection). Every private function that touches those collections is
+ * uses per connection). Every private function that touches either collection is
  * non-suspend and runs to completion before yielding, so the check-then-act guards
  * (e.g. onInboundOffer's two-step gate) are race-free with no explicit locking.
  */
@@ -208,14 +208,12 @@ class LiveConnectionManager(
         sendOffer(pubkeyHex, fresh)
     }
 
-    // Reached identically by an Initiator or an Answerer. Identity checks
-    // prevent a stale duplicate negotiation from replacing an already-live link.
+    // §6.8 — reached by either an Initiator or an Answerer. Role-specific
+    // identity checks prevent a stale negotiation from replacing an existing link.
     private fun onLinkConnected(pubkeyHex: String, link: PeerLink) {
         val existing = _connected.value[pubkeyHex]
-        if (existing != null && existing !== link) {
-            if (initiating[pubkeyHex]?.initiator === link) initiating.remove(pubkeyHex)
-            if (answering[pubkeyHex] === link) answering.remove(pubkeyHex)
-            link.close()
+        if (existing != null) {
+            if (existing !== link) link.close()
             return
         }
 
@@ -226,29 +224,37 @@ class LiveConnectionManager(
         broadcastAnnounce(pubkeyHex)
     }
 
-    // One watcher per link. Identity checks are important because a stale link
-    // may fail after a newer link for the same pubkey has already connected.
+    // One watcher per link, either role. Identity checks ensure a stale answerer
+    // or initiator cannot remove a newer negotiation or live connection.
+    // Deliberately does NOT cancel on Connected: this same job has to stay
+    // alive to observe a later Closed/Failed when the peer eventually departs.
     private fun watchLinkState(pubkeyHex: String, link: PeerLink): Job = scope.launch {
         link.state.collect { state ->
             when (state) {
-                LinkState.Connected -> onLinkConnected(pubkeyHex, link)
+                LinkState.Connected -> {
+                    onLinkConnected(pubkeyHex, link)
+                }
                 LinkState.HandshakeTimedOut, LinkState.Failed -> {
                     when {
-                        initiating[pubkeyHex]?.initiator === link -> onAttemptFailed(pubkeyHex)
+                        initiating[pubkeyHex]?.initiator === link ->
+                            onAttemptFailed(pubkeyHex)
                         answering[pubkeyHex] === link -> {
                             answering.remove(pubkeyHex)
                             link.close()
                         }
-                        _connected.value[pubkeyHex] === link -> {
-                            _connected.update { it - pubkeyHex }
-                        }
+                        _connected.value[pubkeyHex] === link ->
+                            _connected.update { current ->
+                                if (current[pubkeyHex] === link) current - pubkeyHex else current
+                            }
                     }
                     cancel()
                 }
                 LinkState.Closed -> {
                     if (answering[pubkeyHex] === link) answering.remove(pubkeyHex)
                     if (_connected.value[pubkeyHex] === link) {
-                        _connected.update { it - pubkeyHex }
+                        _connected.update { current ->
+                            if (current[pubkeyHex] === link) current - pubkeyHex else current
+                        }
                     }
                     cancel()
                 }
@@ -262,13 +268,7 @@ class LiveConnectionManager(
         val frame = Json.encodeToString<DataChannelFrame>(DataChannelFrame.Announce(newPeerPubkeyHex))
             .encodeToByteArray()
         _connected.value.forEach { (pubkeyHex, link) ->
-            if (pubkeyHex != newPeerPubkeyHex) {
-                scope.launch {
-                    link.send(frame).onFailure { cause ->
-                        logWarning("failed to announce $newPeerPubkeyHex to $pubkeyHex", cause)
-                    }
-                }
-            }
+            if (pubkeyHex != newPeerPubkeyHex) scope.launch { link.send(frame) }
         }
     }
 
@@ -305,23 +305,14 @@ class LiveConnectionManager(
         }
     }
 
-    // Accept offers independently per peer. When both sides initiate the same
-    // pair, the lexicographically smaller pubkey remains the initiator and the
-    // larger pubkey abandons its attempt and answers. Initiations to unrelated
-    // peers must never block this offer.
+    // §6.3 — no global initiation lock. An offer from an unrelated peer may
+    // be answered while this manager is initiating other peers. An offer from
+    // the same peer currently being initiated is ignored, preserving the
+    // one-sided initiator selected by the gossip announcement flow.
     private fun onInboundOffer(fromPubkeyHex: String, offer: SessionDescriptionData) {
         if (fromPubkeyHex in _connected.value) return
+        if (fromPubkeyHex in initiating) return
         if (fromPubkeyHex in answering) return
-
-        val localAttempt = initiating[fromPubkeyHex]
-        if (localAttempt != null) {
-            val iAmDesignatedInitiator = myPubkeyHex < fromPubkeyHex
-            if (iAmDesignatedInitiator) return
-
-            initiating.remove(fromPubkeyHex)
-            localAttempt.watcherJob.cancel()
-            localAttempt.initiator.close()
-        }
 
         val answerer = getAnswerer(
             factory = peerConnectionFactory,
@@ -335,8 +326,10 @@ class LiveConnectionManager(
         scope.launch {
             runCatching {
                 val answer = answerer.createAnswer()
-                check(signalling.send(fromPubkeyHex, Json.encodeToString(answer))) {
-                    "all relays rejected answer for $fromPubkeyHex"
+                val accepted = signalling.send(fromPubkeyHex, Json.encodeToString(answer))
+                if (!accepted && answering[fromPubkeyHex] === answerer) {
+                    answering.remove(fromPubkeyHex)
+                    answerer.close()
                 }
             }.onFailure { cause ->
                 if (answering[fromPubkeyHex] === answerer) {

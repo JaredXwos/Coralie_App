@@ -36,7 +36,6 @@ import org.junit.Assert.fail
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.webrtc.PeerConnectionFactory
-import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
 
 /**
@@ -57,7 +56,7 @@ import kotlin.time.Duration.Companion.seconds
  * connectivity, STUN reachability, and the device/emulator's WebRTC support.
  */
 @RunWith(AndroidJUnit4::class)
-class LiveNostrSixNodeStressTest {
+class LiveNostrMeshStressTest {
 
     @Test
     fun fiveMembersConnectToOneHubAndGossipResolvesFullMesh() {
@@ -284,7 +283,7 @@ class LiveNostrSixNodeStressTest {
             // first suspension before any send is attempted.
             val receivers = deliveries.map { delivery ->
                 async(start = CoroutineStart.UNDISPATCHED) {
-                    withTimeout(ALL_TO_ALL_MESSAGE_TIMEOUT_MS.milliseconds) {
+                    withTimeout(ALL_TO_ALL_MESSAGE_TIMEOUT_MS) {
                         delivery.to.manager.incomingMessages.first { message ->
                             message.fromPubkeyHex == delivery.from.signer.pubkeyHex &&
                                 message.bytes.contentEquals(delivery.payload)
@@ -318,7 +317,7 @@ class LiveNostrSixNodeStressTest {
             }
 
             try {
-                withTimeout(ALL_TO_ALL_MESSAGE_TIMEOUT_MS.milliseconds) {
+                withTimeout(ALL_TO_ALL_MESSAGE_TIMEOUT_MS) {
                     receivers.awaitAll()
                 }
             } catch (failure: Throwable) {

@@ -1,12 +1,12 @@
 package com.jaredxwos.coralie.connection.tests
 
 import androidx.test.ext.junit.runners.AndroidJUnit4
-import androidx.test.platform.app.InstrumentationRegistry
-import com.jaredxwos.coralie.connection.LoopbackSignallingBus
-import com.jaredxwos.coralie.connection.LoopbackSignallingBusClient
 import com.jaredxwos.coralie.connection.awaitTrue
+import com.jaredxwos.coralie.connection.buildPeerConnectionFactory
 import com.jaredxwos.coralie.connection.externalMessages.PeerMessage
 import com.jaredxwos.coralie.connection.manager.LiveConnectionManager
+import com.jaredxwos.coralie.connection.testClients.LoopbackSignallingBus
+import com.jaredxwos.coralie.connection.testClients.LoopbackSignallingBusClient
 import com.jaredxwos.coralie.transport.SdpType
 import com.jaredxwos.coralie.transport.SessionDescriptionData
 import java.util.concurrent.CopyOnWriteArrayList
@@ -22,34 +22,76 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.webrtc.PeerConnectionFactory
 
-/**
- * Verifies app-to-app gossip at the production connection-manager boundary.
- *
- * The current protocol does not relay application payloads through an
- * intermediate peer. It gossips [com.jaredxwos.coralie.connection.DataChannelFrame.Announce]
- * frames so that newly learned peers establish their own direct WebRTC link.
- * This test therefore verifies the complete behaviour:
- *
- * 1. A connects directly to B.
- * 2. A then connects directly to C.
- * 3. A announces C to B over the existing A-B data channel.
- * 4. B initiates a B-C connection without the test calling B.addPeer(C).
- * 5. B and C exchange an application payload over that gossip-created link.
- *
- * Signalling is kept in-process and deterministic with [LoopbackSignallingBus],
- * while all three data-channel connections use the real Android WebRTC stack.
- */
+/** Deterministic in-process gossip mesh formation and payload delivery. */
 @RunWith(AndroidJUnit4::class)
-class AppToAppGossipTest {
-
+class ConnectionManagerGossipTest {
     private val pubkeyA = "11".repeat(32)
     private val pubkeyB = "22".repeat(32)
     private val pubkeyC = "33".repeat(32)
 
     @Test
+    fun aConnectingToBAndCCausesBAndCToSelfConnectViaGossip() = runBlocking {
+        val bus = LoopbackSignallingBus()
+        val signallingA = bus.createClient(pubkeyA)
+        val signallingB = bus.createClient(pubkeyB)
+        val signallingC = bus.createClient(pubkeyC)
+
+        val parentScope = CoroutineScope(SupervisorJob())
+
+        val managerA = LiveConnectionManager(
+            parentScope = parentScope,
+            peerConnectionFactory = buildPeerConnectionFactory(),
+            myPubkeyHex = pubkeyA,
+            signalling = signallingA,
+            iceServers = emptyList(),
+        )
+        val managerB = LiveConnectionManager(
+            parentScope = parentScope,
+            peerConnectionFactory = buildPeerConnectionFactory(),
+            myPubkeyHex = pubkeyB,
+            signalling = signallingB,
+            iceServers = emptyList(),
+        )
+        val managerC = LiveConnectionManager(
+            parentScope = parentScope,
+            peerConnectionFactory = buildPeerConnectionFactory(),
+            myPubkeyHex = pubkeyC,
+            signalling = signallingC,
+            iceServers = emptyList(),
+        )
+
+        // Only A ever calls addPeer -- B and C should never be told about each
+        // other directly by this test.
+        managerA.addPeer(pubkeyB)
+        managerA.addPeer(pubkeyC)
+
+        assertTrue(
+            "A never connected to B",
+            awaitTrue(timeoutMs = 30_000) { pubkeyB in managerA.peers.value })
+        assertTrue(
+            "A never connected to C",
+            awaitTrue(timeoutMs = 30_000) { pubkeyC in managerA.peers.value })
+
+        // The actual point of this test: B and C reach each other purely through
+        // A's gossip, with no addPeer() ever called between them.
+        assertTrue(
+            "B never connected to C via gossip",
+            awaitTrue(timeoutMs = 30_000) { pubkeyC in managerB.peers.value },
+        )
+        assertTrue(
+            "C never connected to B via gossip",
+            awaitTrue(timeoutMs = 30_000) { pubkeyB in managerC.peers.value },
+        )
+
+        managerA.close()
+        managerB.close()
+        managerC.close()
+    }
+
+    @Test
     fun peerLearnedThroughGossipConnectsAndExchangesAppMessage() = runBlocking {
         val parentScope = CoroutineScope(SupervisorJob())
-        val peerConnectionFactory = buildFactory()
+        val peerConnectionFactory = buildPeerConnectionFactory()
         val bus = LoopbackSignallingBus()
 
         val signallingA = bus.createClient(pubkeyA)
@@ -168,18 +210,6 @@ class AppToAppGossipTest {
         }
     }
 
-    private fun buildFactory(): PeerConnectionFactory {
-        val context = InstrumentationRegistry.getInstrumentation().targetContext
-        PeerConnectionFactory.initialize(
-            PeerConnectionFactory.InitializationOptions
-                .builder(context)
-                .createInitializationOptions(),
-        )
-        return PeerConnectionFactory
-            .builder()
-            .createPeerConnectionFactory()
-    }
-
     private fun newManager(
         parentScope: CoroutineScope,
         factory: PeerConnectionFactory,
@@ -194,14 +224,11 @@ class AppToAppGossipTest {
             iceServers = emptyList(),
         )
 
-    private fun LoopbackSignallingBusClient.sentOfferTo(
-        targetPubkey: String,
-    ): Boolean =
+    private fun LoopbackSignallingBusClient.sentOfferTo(targetPubkey: String): Boolean =
         sentMessages.any { (target, plaintext) ->
             target == targetPubkey &&
                 runCatching {
-                    Json.decodeFromString<SessionDescriptionData>(plaintext).type ==
-                        SdpType.OFFER
+                    Json.decodeFromString<SessionDescriptionData>(plaintext).type == SdpType.OFFER
                 }.getOrDefault(false)
         }
 }
