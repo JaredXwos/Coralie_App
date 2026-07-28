@@ -1,12 +1,12 @@
-# Add project specific R8 rules here.
-# AGP will combine all keep rule files in src/main/keepRules to pass to R8
-#
-# For more details, see
-#   https://d.android.com/r/tools/r8/keep-rules
+# WebRTC / jni_zero classes are referenced from native code through
+# JNI_OnLoad, so R8 cannot discover every use statically.
+-keep class org.jni_zero.** { *; }
+-keep class org.webrtc.** { *; }
 
-# If your project uses WebView with JS, uncomment the following
-# and specify the fully qualified class name to the JavaScript interface
-# class:
-#-keepclassmembers class fqcn.of.javascript.interface.for.webview {
-#   public *;
-#}
+# Preserve JNI entry points selected through annotations or native methods.
+-keepclasseswithmembers class * {
+    @org.jni_zero.* <methods>;
+}
+-keepclasseswithmembernames class * {
+    native <methods>;
+}
