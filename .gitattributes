@@ -1,0 +1,21 @@
+# Keep repository text deterministic across Windows and Unix.
+* text=auto eol=lf
+
+# Windows launchers require CRLF; the Unix launcher must remain LF.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+gradlew text eol=lf
+
+# Binary assets and distributable archives.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.jar binary
+*.jks binary
+*.keystore binary
+*.apk binary
+*.aab binary
+*.aar binary
