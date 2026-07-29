@@ -209,10 +209,37 @@ internal class CoralieHostPathHandler :
       toPubkeyHex,
       payload,
     ) {
-      return nativeHost.sendMessage(
-        String(toPubkeyHex),
-        Array.from(payload || []),
+      const target = String(toPubkeyHex);
+      const response = JSON.parse(
+        nativeHost.sendMessage(
+          target,
+          Array.from(payload || []),
+        ),
       );
+
+      if (!response.ok) {
+        const error = new Error(
+          String(
+            response.message ||
+              "Unable to send message",
+          ),
+        );
+        error.name = String(
+          response.errorName ||
+            "CoralieHostError",
+        );
+        error.operation = String(
+          response.operation ||
+            "sendMessage",
+        );
+        error.target = String(
+          response.target ||
+            target,
+        );
+        throw error;
+      }
+
+      return undefined;
     },
 
     getPeersJson() {

@@ -14,6 +14,7 @@ import com.jaredxwos.coralie.transport.context.Initiator
 import com.jaredxwos.coralie.transport.context.PeerLink
 import com.jaredxwos.coralie.transport.context.getAnswerer
 import com.jaredxwos.coralie.transport.context.getInitiator
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -34,6 +35,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlin.time.Clock
 import kotlin.time.Duration
@@ -75,7 +77,7 @@ class LiveConnectionManager(
     private val handshakeTimeout: Duration = 30.seconds,
     private val maxInitiationAttempts: Int = 5,
     private val handshakeTickInterval: Duration = 1.seconds,
-    dispatcher: CoroutineDispatcher = Dispatchers.Default.limitedParallelism(1),
+    private val dispatcher: CoroutineDispatcher = Dispatchers.Default.limitedParallelism(1),
     private val logWarning: (message: String, cause: Throwable?) -> Unit = { _, _ -> },
 ) : ConnectionManager {
 
@@ -134,12 +136,57 @@ class LiveConnectionManager(
         scope.launch { onNewPeerLearned(pubkeyHex) }
     }
 
-    override suspend fun sendMessage(toPubkeyHex: String, bytes: ByteArray): Result<Unit> {
-        val link = _connected.value[toPubkeyHex]
-            ?: return Result.failure(NoSuchElementException("not connected: $toPubkeyHex"))
-        val frame = Json.encodeToString<DataChannelFrame>(DataChannelFrame.App(bytes))
-        return link.send(frame.encodeToByteArray())
-    }
+    override suspend fun sendMessage(
+        toPubkeyHex: String,
+        bytes: ByteArray,
+    ): Result<Unit> =
+        withContext(dispatcher) {
+            val link =
+                _connected.value[toPubkeyHex]
+                    ?: return@withContext Result.failure(
+                        NoSuchElementException(
+                            "Peer is not connected",
+                        ),
+                    )
+
+            if (link.state.value != LinkState.Connected) {
+                removeConnectedLink(
+                    toPubkeyHex,
+                    link,
+                )
+                link.close()
+                return@withContext Result.failure(
+                    IllegalStateException(
+                        "Peer data channel is unavailable",
+                    ),
+                )
+            }
+
+            val result =
+                try {
+                    val frame =
+                        Json.encodeToString<DataChannelFrame>(
+                            DataChannelFrame.App(bytes),
+                        )
+                    link.send(
+                        frame.encodeToByteArray(),
+                    )
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (error: Exception) {
+                    Result.failure(error)
+                }
+
+            if (result.isFailure) {
+                removeConnectedLink(
+                    toPubkeyHex,
+                    link,
+                )
+                link.close()
+            }
+
+            result
+        }
 
     override fun close() {
         scope.cancel()
@@ -229,6 +276,19 @@ class LiveConnectionManager(
         broadcastAnnounce(pubkeyHex)
     }
 
+    private fun removeConnectedLink(
+        pubkeyHex: String,
+        link: PeerLink,
+    ) {
+        _connected.update { current ->
+            if (current[pubkeyHex] === link) {
+                current - pubkeyHex
+            } else {
+                current
+            }
+        }
+    }
+
     // One watcher per link, either role. Identity checks ensure a stale answerer
     // or initiator cannot remove a newer negotiation or live connection.
     // Deliberately does NOT cancel on Connected: this same job has to stay
@@ -248,18 +308,20 @@ class LiveConnectionManager(
                             link.close()
                         }
                         _connected.value[pubkeyHex] === link ->
-                            _connected.update { current ->
-                                if (current[pubkeyHex] === link) current - pubkeyHex else current
-                            }
+                            removeConnectedLink(
+                                pubkeyHex,
+                                link,
+                            )
                     }
                     cancel()
                 }
                 LinkState.Closed -> {
                     if (answering[pubkeyHex]?.link === link) answering.remove(pubkeyHex)
                     if (_connected.value[pubkeyHex] === link) {
-                        _connected.update { current ->
-                            if (current[pubkeyHex] === link) current - pubkeyHex else current
-                        }
+                        removeConnectedLink(
+                            pubkeyHex,
+                            link,
+                        )
                     }
                     cancel()
                 }

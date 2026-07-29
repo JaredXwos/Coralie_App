@@ -64,31 +64,83 @@ class CoralieJavascriptInterface(
      * so page code may pass a Uint8Array directly.
      */
     @JavascriptInterface
-    fun sendMessage(toPubkeyHex: String, payload: IntArray) {
-        loggedCall(
-            operation = "sendMessage",
-            details = "peer=${shortPubkey(toPubkeyHex)} payloadBytes=${payload.size}",
-        ) {
-            authorizeCapability(
-                PageCapability.MESH,
-                "sendMessage",
-            )
-            requirePubkey(toPubkeyHex, "toPubkeyHex")
+    fun sendMessage(
+        toPubkeyHex: String,
+        payload: IntArray,
+    ): String {
+        val normalizedPubkey =
+            toPubkeyHex.lowercase()
 
-            val bytes = ByteArray(payload.size) { index ->
-                val value = payload[index]
-                require(value in 0..255) {
-                    "payload[$index] must be between 0 and 255"
+        val bytes =
+            try {
+                loggedCall(
+                    operation = "sendMessage",
+                    details =
+                        "peer=${shortPubkey(toPubkeyHex)} " +
+                            "payloadBytes=${payload.size}",
+                ) {
+                    authorizeCapability(
+                        PageCapability.MESH,
+                        "sendMessage",
+                    )
+                    requirePubkey(
+                        toPubkeyHex,
+                        "toPubkeyHex",
+                    )
+
+                    ByteArray(payload.size) { index ->
+                        val value = payload[index]
+                        require(value in 0..255) {
+                            "payload[$index] must be between 0 and 255"
+                        }
+                        value.toByte()
+                    }
                 }
-                value.toByte()
+            } catch (error: Exception) {
+                return sendMessageFailureResponse(
+                    error = error,
+                    target = normalizedPubkey,
+                    peerUnavailable = false,
+                )
             }
 
-            runBlocking {
-                requireMesh()
-                    .sendMessage(toPubkeyHex.lowercase(), bytes)
-                    .getOrThrow()
+        val result =
+            try {
+                runBlocking {
+                    requireMesh().sendMessage(
+                        normalizedPubkey,
+                        bytes,
+                    )
+                }
+            } catch (error: Exception) {
+                Result.failure(error)
             }
-        }
+
+        return result.fold(
+            onSuccess = {
+                sendMessageSuccessResponse()
+            },
+            onFailure = { error ->
+                Log.w(
+                    TAG,
+                    "call.rejected operation=sendMessage " +
+                        "peer=${shortPubkey(toPubkeyHex)} " +
+                        "reason=peer-unavailable " +
+                        "exception=${error.javaClass.name} " +
+                        "message=${oneLine(error.message.orEmpty(), 240)}",
+                )
+                sendMessageFailureResponse(
+                    error =
+                        error as? Exception
+                            ?: IllegalStateException(
+                                "Message delivery failed",
+                                error,
+                            ),
+                    target = normalizedPubkey,
+                    peerUnavailable = true,
+                )
+            },
+        )
     }
 
     /** Returns a JSON array of `{pubkeyHex, connectedAt}` objects. */

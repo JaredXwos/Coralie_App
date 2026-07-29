@@ -12,6 +12,7 @@ import com.jaredxwos.coralie.transport.utils.setLocalDescriptionSuspend
 import com.jaredxwos.coralie.transport.utils.setRemoteDescriptionSuspend
 import com.jaredxwos.coralie.transport.utils.toData
 import com.jaredxwos.coralie.transport.utils.toWebRtc
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -205,15 +206,57 @@ internal class LiveRtcContext(
 
     // ---- PeerLink (shared by both) ----
 
-    override suspend fun send(bytes: ByteArray): Result<Unit> = withContext(dispatcher) {
-        val dc = dataChannel
-        if (dc == null || dc.state() != DataChannel.State.OPEN) {
-            return@withContext Result.failure(IllegalStateException("Cannot send: link is ${_state.value}"))
+    override suspend fun send(bytes: ByteArray): Result<Unit> {
+        if (_state.value != LinkState.Connected) {
+            return Result.failure(
+                unavailableChannelError(),
+            )
         }
-        val delivered = dc.send(DataChannel.Buffer(ByteBuffer.wrap(bytes), true))
-        if (delivered) Result.success(Unit)
-        else Result.failure(IllegalStateException("DataChannel.send failed"))
+
+        return try {
+            withContext(dispatcher) {
+                val dc = dataChannel
+                check(
+                    dc != null &&
+                        dc.state() ==
+                        DataChannel.State.OPEN,
+                ) {
+                    "Data channel is not open"
+                }
+                check(
+                    dc.send(
+                        DataChannel.Buffer(
+                            ByteBuffer.wrap(bytes),
+                            true,
+                        ),
+                    ),
+                ) {
+                    "DataChannel.send returned false"
+                }
+            }
+            Result.success(Unit)
+        } catch (error: CancellationException) {
+            if (_state.value != LinkState.Connected) {
+                Result.failure(
+                    unavailableChannelError(error),
+                )
+            } else {
+                throw error
+            }
+        } catch (error: Exception) {
+            Result.failure(
+                unavailableChannelError(error),
+            )
+        }
     }
+
+    private fun unavailableChannelError(
+        cause: Throwable? = null,
+    ): IllegalStateException =
+        IllegalStateException(
+            "Cannot send: peer data channel is unavailable",
+            cause,
+        )
 
     override fun close() {
         scope.launch {

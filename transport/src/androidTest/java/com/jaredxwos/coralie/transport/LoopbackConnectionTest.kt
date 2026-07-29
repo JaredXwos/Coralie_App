@@ -124,7 +124,24 @@ class LoopbackConnectionTest {
         withTimeout(10.seconds) {
             answerer.state.first { it == LinkState.Closed }
         }
-        Unit
+
+        val sendAttempt =
+            runCatching {
+                answerer.send(
+                    "late score".encodeToByteArray(),
+                )
+            }
+
+        assertTrue(
+            "send must return a Result instead of throwing",
+            sendAttempt.isSuccess,
+        )
+        assertTrue(
+            "send on a closed data channel must fail",
+            sendAttempt.getOrThrow().isFailure,
+        )
+
+        answerer.close()
     }
 
     @Test

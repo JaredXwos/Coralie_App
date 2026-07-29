@@ -224,6 +224,23 @@ class ConnectionManagerCoreTest {
             awaitTrue(timeoutMs = 15_000) { pubkeyA !in managerB.peers.value },
         )
 
+        val sendAttempt =
+            runCatching {
+                managerB.sendMessage(
+                    pubkeyA,
+                    "late score".encodeToByteArray(),
+                )
+            }
+
+        assertTrue(
+            "sendMessage must return a Result instead of throwing",
+            sendAttempt.isSuccess,
+        )
+        assertTrue(
+            "sendMessage to a departed peer must fail",
+            sendAttempt.getOrThrow().isFailure,
+        )
+
         managerB.close()
     }
 }
