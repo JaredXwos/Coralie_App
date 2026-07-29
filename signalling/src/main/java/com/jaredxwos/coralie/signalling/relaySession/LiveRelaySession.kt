@@ -22,6 +22,9 @@ class LiveRelaySession(
     private val sink: EventSink,
     private val heartbeatInterval: Duration = 60.seconds,
     private val reconnectPollInterval: Duration = 500.milliseconds,
+    private val logDebug: (String) -> Unit = {
+        Log.d(TAG, it)
+    },
 ) : RelaySession {
 
     private data class Subscription(
@@ -44,9 +47,9 @@ class LiveRelaySession(
     override suspend fun subscribe(request: ClientToServerMessage.Req): Result<Unit> {
         lock.withLock { subs[request.subId] = Subscription(request, RelaySession.SubStatus.PENDING) }
         emitStates()
-        Log.d("RelaySession","REQ: ${request.toWireText()}")
+        logDebug("REQ: ${request.toWireText()}")
         val result = relay.send(request.toWireText())
-        Log.d("RelaySession", "subscribe send result: $result")
+        logDebug("subscribe send result: $result")
         return result
     }
     override suspend fun publish(event: ClientToServerMessage.Event): Result<Unit> =
@@ -54,10 +57,14 @@ class LiveRelaySession(
 
     private suspend fun consumeFrames() {
         for (result in relay.frames) {
-            Log.d("RelaySession", "frame received: $result")
+            logDebug("frame received: $result")
             result.fold(
                 onSuccess = { handleFrame(it) },
-                onFailure = { Log.d("RelaySession", "frame parse failed: ${it.message}") },
+                onFailure = {
+                    logDebug(
+                        "frame parse failed: ${it.message}",
+                    )
+                },
             )
         }
         // Channel only closes when RelaySocket has given up retrying entirely.
@@ -103,7 +110,10 @@ class LiveRelaySession(
         for (sub in toSend) {
             val refreshed = sub.lastEventAt?.let { sub.request.copy(since = it) } ?: sub.request
             val result = relay.send(refreshed.toWireText())
-            Log.d("RelaySession", "reissue send result: $result for ${refreshed.toWireText()}")
+            logDebug(
+                "reissue send result: $result " +
+                    "for ${refreshed.toWireText()}",
+            )
         }
     }
 
@@ -123,5 +133,9 @@ class LiveRelaySession(
 
     private suspend fun emitStates() {
         _subStates.value = lock.withLock { subs.mapValues { it.value.status } }
+    }
+
+    private companion object {
+        const val TAG = "RelaySession"
     }
 }

@@ -30,6 +30,9 @@ class LiveNostrSignallingClient(
     private val sink: EventSink = DedupingEventSink(),
     private val clock: Clock = Clock.System,
     dispatcher: CoroutineDispatcher = Dispatchers.IO,
+    private val logDebug: (String) -> Unit = {
+        Log.d(TAG, it)
+    },
 ) : NostrSignallingClient {
 
     /** Caller-assembled per-relay wiring — both the socket and the session
@@ -90,20 +93,30 @@ class LiveNostrSignallingClient(
 
     private suspend fun pumpInbound() {
         for (event in sink.events) {
-            Log.d("SignallingClient", "pumpInbound saw event id=${event.id} from=${event.pubkey}")
+            logDebug(
+                "pumpInbound saw event " +
+                    "id=${event.id} from=${event.pubkey}",
+            )
             if (!event.verify()) {
-                Log.d("SignallingClient", "verify() FAILED for event id=${event.id}")
+                logDebug(
+                    "verify() FAILED for event id=${event.id}",
+                )
                 _lastInboundStatus = false
                 continue
             }
             cipherFor(event.pubkey).decrypt(event.content)
                 .onSuccess { plaintext ->
-                    Log.d("SignallingClient", "decrypt SUCCESS, forwarding to inbound channel")
+                    logDebug(
+                        "decrypt SUCCESS, forwarding " +
+                            "to inbound channel",
+                    )
                     _lastInboundStatus = true
                     _inbound.send(InboundMessage(fromPubkey = event.pubkey, plaintext = plaintext))
                 }
                 .onFailure {
-                    Log.d("SignallingClient", "decrypt FAILED: ${it.message}")
+                    logDebug(
+                        "decrypt FAILED: ${it.message}",
+                    )
                     _lastInboundStatus = false
                 }
         }
@@ -111,5 +124,9 @@ class LiveNostrSignallingClient(
 
     private suspend fun cipherFor(peerPubkeyHex: String): Nip44Cipher = cipherLock.withLock {
         ciphers.getOrPut(peerPubkeyHex) { BouncyCastleNip44Cipher(signer.getConvoKey(peerPubkeyHex)) }
+    }
+
+    private companion object {
+        const val TAG = "SignallingClient"
     }
 }

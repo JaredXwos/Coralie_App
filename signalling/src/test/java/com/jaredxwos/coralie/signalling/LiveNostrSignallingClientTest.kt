@@ -32,6 +32,7 @@ class LiveNostrSignallingClientTest {
     ) = LiveNostrSignallingClient(
         relays = relays, signer = signer, signallingKind = signallingKind, sink = sink,
         dispatcher = StandardTestDispatcher(testScheduler),
+        logDebug = {},
     )
     private class FakeRelaySocket(override var isOpen: Boolean = true) : RelaySocket {
         override val frames = Channel<Result<ServerToClientMessage>>(Channel.UNLIMITED)

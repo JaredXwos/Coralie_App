@@ -62,7 +62,12 @@ class LiveRelaySessionTest {
     @Test
     fun subscribeSendsReqAndMarksPending() = runTest {
         val socket = FakeRelaySocket()
-        val session = LiveRelaySession(socket, FakeEventSink())
+        val session =
+            LiveRelaySession(
+                socket,
+                FakeEventSink(),
+                logDebug = {},
+            )
         session.start(backgroundScope)
 
         session.subscribe(fakeFilterReq())
@@ -76,7 +81,12 @@ class LiveRelaySessionTest {
     @Test
     fun eoseMarksSubscriptionLive() = runTest {
         val socket = FakeRelaySocket()
-        val session = LiveRelaySession(socket, FakeEventSink())
+        val session =
+            LiveRelaySession(
+                socket,
+                FakeEventSink(),
+                logDebug = {},
+            )
         session.start(backgroundScope)
         session.subscribe(fakeFilterReq())
         runCurrent()
@@ -91,7 +101,12 @@ class LiveRelaySessionTest {
     @Test
     fun closedMarksSubscriptionStopped() = runTest {
         val socket = FakeRelaySocket()
-        val session = LiveRelaySession(socket, FakeEventSink())
+        val session =
+            LiveRelaySession(
+                socket,
+                FakeEventSink(),
+                logDebug = {},
+            )
         session.start(backgroundScope)
         session.subscribe(fakeFilterReq())
         runCurrent()
@@ -107,7 +122,12 @@ class LiveRelaySessionTest {
     fun eventFrameIsForwardedToSink() = runTest {
         val socket = FakeRelaySocket()
         val sink = FakeEventSink()
-        val session = LiveRelaySession(socket, sink)
+        val session =
+            LiveRelaySession(
+                socket,
+                sink,
+                logDebug = {},
+            )
         session.start(backgroundScope)
         session.subscribe(fakeFilterReq())
         runCurrent()
@@ -123,7 +143,13 @@ class LiveRelaySessionTest {
     @Test
     fun heartbeatReissuesReqWithAdvancedSince() = runTest {
         val socket = FakeRelaySocket()
-        val session = LiveRelaySession(socket, FakeEventSink(), heartbeatInterval = 1.seconds)
+        val session =
+            LiveRelaySession(
+                socket,
+                FakeEventSink(),
+                heartbeatInterval = 1.seconds,
+                logDebug = {},
+            )
         session.start(backgroundScope)
         session.subscribe(fakeFilterReq())
         runCurrent()
@@ -143,7 +169,14 @@ class LiveRelaySessionTest {
     @Test
     fun reconnectResetsSubscriptionsAndReissuesReq() = runTest {
         val socket = FakeRelaySocket()
-        val session = LiveRelaySession(socket, FakeEventSink(), reconnectPollInterval = 100.milliseconds)
+        val session =
+            LiveRelaySession(
+                socket,
+                FakeEventSink(),
+                reconnectPollInterval =
+                    100.milliseconds,
+                logDebug = {},
+            )
         session.start(backgroundScope)
         session.subscribe(fakeFilterReq())
         runCurrent()
@@ -163,7 +196,12 @@ class LiveRelaySessionTest {
     @Test
     fun publishSendsEventText() = runTest {
         val socket = FakeRelaySocket()
-        val session = LiveRelaySession(socket, FakeEventSink())
+        val session =
+            LiveRelaySession(
+                socket,
+                FakeEventSink(),
+                logDebug = {},
+            )
 
         session.publish(ClientToServerMessage.Event(fakeEvent("id-1")))
 
@@ -174,7 +212,12 @@ class LiveRelaySessionTest {
     @Test
     fun frameChannelClosingMarksAllSubscriptionsStopped() = runTest {
         val socket = FakeRelaySocket()
-        val session = LiveRelaySession(socket, FakeEventSink())
+        val session =
+            LiveRelaySession(
+                socket,
+                FakeEventSink(),
+                logDebug = {},
+            )
         session.start(backgroundScope)
         session.subscribe(fakeFilterReq())
         runCurrent()
