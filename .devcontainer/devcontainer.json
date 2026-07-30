@@ -1,0 +1,23 @@
+{
+  "name": "My Project Dev Container",
+  "image": "mcr.microsoft.com/devcontainers/base:bookworm",
+  "remoteUser": "vscode",
+  "features": {
+    "ghcr.io/devcontainers/features/node:1": {
+      "version": "lts"
+    }
+  },
+  "postCreateCommand": "bash .devcontainer/post-create.sh",
+  "remoteEnv": {
+    "PATH": "${containerEnv:PATH}:/home/vscode/.local/bin"
+  },
+  "mounts": [
+    "source=${localEnv:USERPROFILE}/.codex-devcontainer,target=/home/vscode/.codex,type=bind"
+  ],
+  "runArgs": [
+    "--name",
+    "htmlhoster-devcontainer",
+    "--cap-drop=ALL",
+    "--security-opt=no-new-privileges"
+  ]
+}

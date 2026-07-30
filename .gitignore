@@ -13,6 +13,7 @@
 
 # Local tooling
 .serena/
+.zed/
 
 # Android and native build output
 .externalNativeBuild/
