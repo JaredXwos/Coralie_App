@@ -483,6 +483,51 @@ The canonical page-facing API specification should remain in the browser-runtime
 <!-- Replace OWNER/REPOSITORY with the browser runtime repository. -->
 See: `https://github.com/OWNER/REPOSITORY/blob/main/docs/runtime-api-v2.md`
 
+### Sending messages and delivery errors
+
+`sendMessage(toPubkeyHex, payload)` accepts a 64-character hexadecimal peer
+public key and a byte payload such as a `Uint8Array`. It returns `undefined`
+when the host accepts the message for delivery.
+
+The facade converts the native host's structured failure response into a
+synchronously thrown JavaScript `Error`. Callers can inspect these fields:
+
+| Field | Value |
+|---|---|
+| `name` | Host error type |
+| `operation` | `"sendMessage"` |
+| `target` | Target string normalized to lowercase |
+
+In particular, `name` is `"PeerUnavailableError"` when the peer has
+disconnected, is no longer in the connected-peer snapshot, or its WebRTC data
+channel is unavailable. Its message is:
+
+```text
+Peer disconnected or channel unavailable
+```
+
+This is a synchronous exception from the Android v2 facade, not a rejected
+promise or a native bridge exception. A peer can disconnect between
+`getPeersJson()` and `sendMessage()`, so page code should handle the error even
+after observing the peer as connected:
+
+```js
+try {
+  window.Coralie.sendMessage(peerPubkey, payload);
+} catch (error) {
+  if (error.name === "PeerUnavailableError") {
+    console.info(`Peer ${error.target} is no longer available`);
+  } else {
+    throw error;
+  }
+}
+```
+
+Other failures use `"PermissionRejectedError"` for a rejected mesh permission,
+`"InvalidArgumentError"` for an invalid public key or payload byte, and
+`"CoralieHostError"` for an otherwise unclassified host failure. All of these
+errors expose the same `operation` and `target` fields.
+
 ---
 
 ## Capabilities and permissions
@@ -562,6 +607,13 @@ The connection layer:
 - tracks directly connected peers;
 - broadcasts peer announcements to established links; and
 - opens additional direct links when a new peer is learned.
+
+At the Kotlin API boundary, `ConnectionManager.sendMessage()` and
+`PeerLink.send()` report a disconnected peer, a closed data channel, or a
+failed data-channel send as `Result.failure`. These expected delivery failures
+do not escape as bridge exceptions. `ConnectionManager.sendMessage()` preserves
+coroutine cancellation; `PeerLink.send()` only converts cancellation to a
+failure when the link has become disconnected and otherwise rethrows it.
 
 Peer announcements are not global discovery and do not guarantee that every network topology can form a complete mesh.
 
@@ -693,6 +745,20 @@ The debug APK is generated under:
 ```text
 app/build/outputs/apk/debug/
 ```
+
+### Optional Codex dev container
+
+The checked-in `.devcontainer/devcontainer.json` provides the repository's
+Codex-oriented development container. On creation it installs the Codex CLI,
+installs `uv` if it is not already available, installs `serena-agent`,
+configures Serena for Codex, and marks `/workspaces/HTMLHoster` as a Git safe
+directory.
+
+The configuration mounts `%USERPROFILE%/.codex-devcontainer` from a Windows
+host at `/home/vscode/.codex` so Codex configuration and credentials survive
+container rebuilds. Create that host directory before opening the repository
+in the container. The container setup does not declare Android SDK tooling, so
+the Android requirements above still apply when building or running tests.
 
 ### Install a debug build
 
@@ -859,6 +925,10 @@ The Android App Bundle is generated under:
 ```text
 app/build/outputs/bundle/release/
 ```
+
+With AGP 9.3, application R8 rules live in the source-set directory
+`app/src/main/keepRules/`. Keep WebRTC and `jni_zero` JNI retention rules in
+`rules.keep`; do not restore the former `app/proguard-rules.pro` wiring.
 
 Before publishing:
 
