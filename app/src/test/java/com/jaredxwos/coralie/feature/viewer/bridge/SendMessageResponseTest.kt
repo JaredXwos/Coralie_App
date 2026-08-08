@@ -63,4 +63,26 @@ class SendMessageResponseTest {
                 .jsonPrimitive.content,
         )
     }
+
+    @Test
+    fun staleClosedChannelDoesNotLeakNativeFailureDetails() {
+        val response =
+            Json.parseToJsonElement(
+                sendMessageFailureResponse(
+                    error = IllegalStateException("SCTP channel CLOSED at native address 0x1234"),
+                    target = "cd".repeat(32),
+                    peerUnavailable = true,
+                ),
+            ).jsonObject
+
+        assertEquals(
+            "PeerUnavailableError",
+            response.getValue("errorName").jsonPrimitive.content,
+        )
+        assertEquals(
+            "Peer disconnected or channel unavailable",
+            response.getValue("message").jsonPrimitive.content,
+        )
+        assertFalse(response.toString().contains("0x1234"))
+    }
 }

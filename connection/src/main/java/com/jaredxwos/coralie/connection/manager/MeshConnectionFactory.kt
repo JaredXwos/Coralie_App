@@ -24,9 +24,9 @@ private lateinit var meshPeerConnectionFactory: PeerConnectionFactory
  * AppStorage.init(dao, filesDir)'s "call once at startup" convention.
  *
  * PeerConnectionFactory and the OkHttpClient used for relay sockets are built
- * once and reused across every PageRender/AppMesh.rebuild() call: they carry no
- * peer identity, so there's no reason to pay their (native, connection-pool)
- * construction cost on every page load.
+ * once and reused across all ConnectionManager instances: they carry no peer
+ * identity, so explicit mesh resets do not need to repay their native and
+ * connection-pool construction costs.
  */
 fun initMeshRuntime(context: Context) {
     meshHttpClient = OkHttpClient()
@@ -40,18 +40,17 @@ fun initMeshRuntime(context: Context) {
 
 /**
  * Builds a brand-new ConnectionManager: fresh Signer (fresh pubkey/peer identity)
- * and fresh relay sockets/sessions every call, per the app's "become a new peer
- * on every page load" design. Intended as AppMesh's buildManager lambda — AppMesh
- * already calls this on every WebView creation and again from the bridge's
- * close() callback, so each call here mints a brand-new identity as intended.
+ * and fresh relay sockets/sessions every call. Intended as AppMesh's
+ * buildManager lambda: ordinary WebView rebinds retain its current instance,
+ * while an explicit reset or a later start after intentional teardown invokes
+ * this factory to mint a new identity.
  *
  * [parentScope] should be an app-lifetime-owned scope (e.g. HtmlHosterApplication's
  * appScope) so it outlives any single page/WebView — LiveConnectionManager treats
  * it as the external ancestor whose cancellation should tear down the whole mesh.
  *
- * Relay sockets are rebuilt (not persisted/reused) on every call, trading a
- * little reconnect overhead per page load for not having to track/tear down
- * old relay state — matches the "regenerate everything per page load" model.
+ * Relay sockets are owned by the returned manager and are rebuilt only when a
+ * new manager is explicitly requested.
  */
 fun buildLiveConnectionManager(parentScope: CoroutineScope): ConnectionManager {
     check(::meshHttpClient.isInitialized && ::meshPeerConnectionFactory.isInitialized) {

@@ -421,6 +421,22 @@ class ViewerSession internal constructor(
             return
         }
 
+        // A retained ViewerSession can receive a replacement WebView after a
+        // reload/recreation. Always refresh the event binding, even when mesh
+        // capability activation itself has already completed.
+        if (capability == PageCapability.MESH) {
+            withContext(Dispatchers.Main.immediate) {
+                checkOpen()
+                emitterRef.get()?.let { emitter ->
+                    AppMesh.attach(
+                        sessionId,
+                        scope,
+                        emitter::emit,
+                    )
+                }
+            }
+        }
+
         activationGate.withLock {
             if (
                 activatedMask.get() and
@@ -436,14 +452,8 @@ class ViewerSession internal constructor(
                     withContext(
                         Dispatchers.Main.immediate,
                     ) {
-                        val emitter =
-                            emitterRef.get()
-                                ?: return@withContext
-                        AppMesh.attach(
-                            scope,
-                            emitter::emit,
-                        )
-                        AppMesh.rebuild()
+                        if (emitterRef.get() == null) return@withContext
+                        AppMesh.start(sessionId)
                     }
 
                 PageCapability.TIMERS ->
@@ -509,12 +519,10 @@ class ViewerSession internal constructor(
         val activated =
             activatedMask.getAndSet(0L)
 
-        if (
-            activated and
-            PageCapability.MESH.bit != 0L
-        ) {
-            AppMesh.teardownForPageExit()
-        }
+        // Mesh attachment happens before activation is recorded, so cleanup
+        // cannot be conditional on the activated bit. The runtime's owner
+        // check makes this safe when a newer session has already rebound it.
+        AppMesh.teardownForPageExit(sessionId)
 
         if (
             activated and

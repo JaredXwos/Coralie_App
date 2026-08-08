@@ -168,7 +168,7 @@ class CoralieJavascriptInterface(
                 PageCapability.MESH,
                 "reset",
             )
-            AppMesh.rebuild()
+            AppMesh.reset(session.sessionId)
         }
 
     @JavascriptInterface
@@ -178,7 +178,9 @@ class CoralieJavascriptInterface(
                 PageCapability.MESH,
                 "close",
             )
-            AppMesh.teardownForPageExit()
+            AppMesh.teardownForPageExit(
+                session.sessionId,
+            )
         }
     }
 
