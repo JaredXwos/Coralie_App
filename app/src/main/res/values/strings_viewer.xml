@@ -5,4 +5,7 @@
     <string name="leave_page_title">Leave %1$s?</string>
     <string name="leave_page_message">You\'ll disconnect from this page and return to the home screen. You can come back anytime — nothing will be deleted.</string>
     <string name="loading_page_data">Loading page data…</string>
+    <string name="document_access_required">Coralie no longer has access to “%1$s”. Select the HTML document again to continue.</string>
+    <string name="document_access_retry_failed">That document could not be opened. Choose it again or select another HTML document.</string>
+    <string name="button_select_document">Select document</string>
 </resources>

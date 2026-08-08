@@ -99,6 +99,12 @@ internal interface LibraryDao {
         capabilityMask: Long,
     )
 
+    @Query("UPDATE html SET sourceUri = :sourceUri WHERE assetId = :assetId")
+    suspend fun updatePageSourceUri(
+        assetId: Long,
+        sourceUri: String,
+    ): Int
+
     @Query("DELETE FROM html WHERE assetId = :assetId")
     suspend fun deletePage(assetId: Long)
 

@@ -14,8 +14,8 @@ import kotlinx.coroutines.CancellationException
 
 class PageLibrary internal constructor(
     private val dao: LibraryDao,
-    private val cache: PageCache,
-    private val uriStore: PersistentUriStore,
+    private val cache: HtmlPageCache,
+    private val uriStore: UriGrantStore,
 ) {
     suspend fun getPage(
         assetId: Long,
@@ -266,12 +266,96 @@ class PageLibrary internal constructor(
                     cache.copyFromUri(
                         assetId = assetId,
                         sourceUri = page.sourceUri,
+                    ).fold(
+                        onSuccess = { file -> Result.success(file) },
+                        onFailure = { error ->
+                            val grantPresent =
+                                uriStore.hasPersistedReadAccess(page.sourceUri)
+                            if (!grantPresent || error is SourceDocumentReadException) {
+                                Result.failure(
+                                    DocumentAccessException(
+                                        sourceUri = page.sourceUri,
+                                        grantPresent = grantPresent,
+                                        cause = error,
+                                    ),
+                                )
+                            } else {
+                                Result.failure(error)
+                            }
+                        },
                     )
                 },
                 onFailure = { error ->
                     Result.failure(error)
                 },
             )
+
+    /**
+     * Reauthorizes a saved page without changing its identity or metadata.
+     * The database changes only after the replacement URI is persistable and
+     * readable. This also repairs a revoked grant when [sourceUri] is unchanged.
+     */
+    suspend fun reselectSource(
+        assetId: Long,
+        sourceUri: Uri,
+    ): Result<File> =
+        resultOf {
+            val existing =
+                dao.retrievePage(assetId)
+                    ?: throw NoSuchElementException(
+                        "No HTML asset with id $assetId",
+                    )
+            val oldSource = existing.sourceUri
+            val newSource = sourceUri.toString()
+            val grantExisted =
+                uriStore.hasPersistedReadAccess(sourceUri)
+
+            uriStore.persist(sourceUri).getOrThrow()
+
+            val refreshed =
+                cache.copyFromUri(assetId, sourceUri)
+                    .getOrElse { error ->
+                        if (
+                            !grantExisted &&
+                            oldSource != newSource &&
+                            !dao.sourceUriExists(newSource)
+                        ) {
+                            uriStore.release(sourceUri).getOrNull()
+                        }
+                        val grantPresent =
+                            uriStore.hasPersistedReadAccess(sourceUri)
+                        if (!grantPresent || error is SourceDocumentReadException) {
+                            throw DocumentAccessException(
+                                sourceUri = sourceUri,
+                                grantPresent = grantPresent,
+                                cause = error,
+                            )
+                        }
+                        throw error
+                    }
+
+            try {
+                if (oldSource != newSource) {
+                    check(
+                        dao.updatePageSourceUri(assetId, newSource) == 1,
+                    ) {
+                        "No HTML asset with id $assetId"
+                    }
+                    releaseSourceIfUnused(oldSource)
+                }
+            } catch (error: Exception) {
+                if (
+                    !grantExisted &&
+                    oldSource != newSource &&
+                    !dao.sourceUriExists(newSource)
+                ) {
+                    uriStore.release(sourceUri).getOrNull()
+                }
+                throw error
+            }
+
+            refreshed
+        }
 
     private suspend fun importPageOrThrow(
         spaceId: Long,
@@ -284,6 +368,8 @@ class PageLibrary internal constructor(
             "Page name must not be blank"
         }
 
+        val grantExisted =
+            uriStore.hasPersistedReadAccess(sourceUri)
         uriStore.persist(sourceUri).getOrThrow()
 
         return try {
@@ -295,6 +381,7 @@ class PageLibrary internal constructor(
             )
         } catch (error: Exception) {
             if (
+                !grantExisted &&
                 !dao.sourceUriExists(
                     sourceUri.toString(),
                 )
@@ -323,8 +410,14 @@ class PageLibrary internal constructor(
             sourceUri.toString()
         val sourceChanged =
             existing?.sourceUri != newSource
+        val grantExisted =
+            uriStore.hasPersistedReadAccess(sourceUri)
 
-        if (existing == null || sourceChanged) {
+        if (
+            existing == null ||
+            sourceChanged ||
+            !uriStore.hasPersistedReadAccess(sourceUri)
+        ) {
             uriStore.persist(sourceUri).getOrThrow()
         }
 
@@ -339,6 +432,7 @@ class PageLibrary internal constructor(
                 )
             } catch (error: Exception) {
                 if (
+                    !grantExisted &&
                     (existing == null || sourceChanged) &&
                     !dao.sourceUriExists(newSource)
                 ) {

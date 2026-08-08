@@ -13,6 +13,7 @@ import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -44,6 +45,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.webkit.WebViewAssetLoader
 import com.jaredxwos.coralie.R
+import com.jaredxwos.coralie.feature.editor.HtmlDocumentContract
 import com.jaredxwos.coralie.feature.viewer.runtime.http.NativeHttpProxy
 import com.jaredxwos.coralie.feature.viewer.bridge.CoralieJavascriptInterface
 import com.jaredxwos.coralie.feature.viewer.webview.CORALIE_HOST_CACHE_PATH_PREFIX
@@ -125,7 +127,18 @@ fun ViewerScreen(
             ViewerUiState.Ready
     val session = ready?.session
     val pageName =
-        ready?.page?.name.orEmpty()
+        when (val state = uiState) {
+            is ViewerUiState.Ready -> state.page.name
+            is ViewerUiState.DocumentAccessRequired -> state.page.name
+            else -> ""
+        }
+
+    val documentPicker =
+        rememberLauncherForActivityResult(
+            contract = HtmlDocumentContract(),
+        ) { uri: Uri? ->
+            uri?.let(viewModel::reselectDocument)
+        }
 
     val activeHttpRequests by
         NativeHttpProxy.activeRequests
@@ -356,6 +369,50 @@ fun ViewerScreen(
                                         .button_back,
                                 ),
                             )
+                        }
+                    }
+
+                is ViewerUiState.DocumentAccessRequired ->
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(16.dp),
+                        verticalArrangement =
+                            Arrangement.spacedBy(12.dp),
+                    ) {
+                        Text(
+                            stringResource(
+                                R.string.document_access_required,
+                                state.page.name,
+                            ),
+                        )
+
+                        state.recoveryError?.let {
+                            Text(
+                                stringResource(
+                                    R.string.document_access_retry_failed,
+                                ),
+                                color = MaterialTheme.colorScheme.error,
+                            )
+                        }
+
+                        Button(
+                            enabled = !state.isRecovering,
+                            onClick = {
+                                documentPicker.launch(
+                                    HtmlDocumentContract.MIME_TYPES,
+                                )
+                            },
+                        ) {
+                            Text(
+                                stringResource(
+                                    R.string.button_select_document,
+                                ),
+                            )
+                        }
+
+                        Button(onClick = onBack) {
+                            Text(stringResource(R.string.button_back))
                         }
                     }
 

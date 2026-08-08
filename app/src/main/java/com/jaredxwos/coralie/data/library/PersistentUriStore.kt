@@ -4,10 +4,23 @@ import android.content.ContentResolver
 import android.content.Intent
 import android.net.Uri
 
+internal interface UriGrantStore {
+    fun hasPersistedReadAccess(uri: Uri): Boolean
+    fun persist(uri: Uri): Result<Unit>
+    fun release(uri: Uri): Result<Unit>
+}
+
 internal class PersistentUriStore(
     private val contentResolver: ContentResolver,
-) {
-    fun persist(uri: Uri): Result<Unit> =
+) : UriGrantStore {
+    override fun hasPersistedReadAccess(uri: Uri): Boolean =
+        contentResolver.persistedUriPermissions
+            .any { permission ->
+                permission.uri == uri &&
+                    permission.isReadPermission
+            }
+
+    override fun persist(uri: Uri): Result<Unit> =
         runCatching {
             contentResolver.takePersistableUriPermission(
                 uri,
@@ -15,7 +28,7 @@ internal class PersistentUriStore(
             )
         }
 
-    fun release(uri: Uri): Result<Unit> =
+    override fun release(uri: Uri): Result<Unit> =
         runCatching {
             contentResolver.releasePersistableUriPermission(
                 uri,

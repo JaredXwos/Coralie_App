@@ -13,6 +13,13 @@ sealed interface ViewerUiState {
         val session: ViewerSession,
     ) : ViewerUiState
 
+    data class DocumentAccessRequired(
+        val page: PageDetails,
+        val cause: Throwable,
+        val isRecovering: Boolean = false,
+        val recoveryError: Throwable? = null,
+    ) : ViewerUiState
+
     data class Failed(
         val cause: Throwable,
     ) : ViewerUiState

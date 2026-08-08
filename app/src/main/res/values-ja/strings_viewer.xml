@@ -5,4 +5,7 @@
     <string name="leave_page_title">ページを閉じる</string>
     <string name="leave_page_message">このページを閉じてもよろしいでしょうか。データは保存されますので、いつでも再開できます。</string>
     <string name="loading_page_data">ページデータを読み込んでいます…</string>
+    <string name="document_access_required">「%1$s」へのアクセスが失われました。続行するには HTML ファイルをもう一度選択してください。</string>
+    <string name="document_access_retry_failed">そのファイルを開けませんでした。もう一度選択するか、別の HTML ファイルを選択してください。</string>
+    <string name="button_select_document">ファイルを選択</string>
 </resources>

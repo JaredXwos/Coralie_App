@@ -3,7 +3,6 @@ package com.jaredxwos.coralie.feature.editor
 import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -67,9 +66,7 @@ fun PageEditorScreen(
 
     val filePicker =
         rememberLauncherForActivityResult(
-            contract =
-                ActivityResultContracts
-                    .OpenDocument(),
+            contract = HtmlDocumentContract(),
         ) { uri: Uri? ->
             uri?.let(
                 viewModel::setSourceUri,
@@ -184,7 +181,7 @@ fun PageEditorScreen(
                         ?.lastPathSegment,
                 onClick = {
                     filePicker.launch(
-                        arrayOf("text/html"),
+                        HtmlDocumentContract.MIME_TYPES,
                     )
                 },
                 modifier =

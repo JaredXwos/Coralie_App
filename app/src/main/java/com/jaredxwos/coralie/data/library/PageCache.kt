@@ -8,14 +8,24 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
+internal interface HtmlPageCache {
+    suspend fun copyFromUri(assetId: Long, sourceUri: Uri): Result<File>
+    fun delete(assetId: Long): Boolean
+}
+
+/** An error while opening or reading the provider-backed source document. */
+internal class SourceDocumentReadException(
+    cause: Exception,
+) : IOException("Unable to read the selected HTML document", cause)
+
 internal class PageCache(
     private val cacheDirectory: File,
     private val contentResolver: ContentResolver,
-) {
+) : HtmlPageCache {
     fun fileFor(assetId: Long): File =
         File(cacheDirectory, "$assetId.html")
 
-    suspend fun copyFromUri(
+    override suspend fun copyFromUri(
         assetId: Long,
         sourceUri: Uri,
     ): Result<File> =
@@ -31,15 +41,33 @@ internal class PageCache(
                     )
 
                 val input =
-                    contentResolver.openInputStream(sourceUri)
-                        ?: throw IOException(
-                            "No stream available for $sourceUri",
-                        )
+                    try {
+                        contentResolver.openInputStream(sourceUri)
+                            ?: throw IOException(
+                                "No stream available for $sourceUri",
+                            )
+                    } catch (error: CancellationException) {
+                        throw error
+                    } catch (error: Exception) {
+                        throw SourceDocumentReadException(error)
+                    }
 
                 try {
                     input.use { source ->
                         temporary.outputStream().use { target ->
-                            source.copyTo(target)
+                            val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                            while (true) {
+                                val count =
+                                    try {
+                                        source.read(buffer)
+                                    } catch (error: CancellationException) {
+                                        throw error
+                                    } catch (error: Exception) {
+                                        throw SourceDocumentReadException(error)
+                                    }
+                                if (count < 0) break
+                                target.write(buffer, 0, count)
+                            }
                         }
                     }
 
@@ -65,6 +93,6 @@ internal class PageCache(
             }
         }
 
-    fun delete(assetId: Long): Boolean =
+    override fun delete(assetId: Long): Boolean =
         fileFor(assetId).delete()
 }

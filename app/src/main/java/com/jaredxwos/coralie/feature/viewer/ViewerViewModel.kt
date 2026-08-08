@@ -1,8 +1,10 @@
 package com.jaredxwos.coralie.feature.viewer
 
+import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import com.jaredxwos.coralie.data.library.DocumentAccessException
 import com.jaredxwos.coralie.data.library.PageLibrary
 import com.jaredxwos.coralie.feature.viewer.runtime.ViewerSession
 import com.jaredxwos.coralie.feature.viewer.runtime.ViewerSessionFactory
@@ -36,14 +38,33 @@ class ViewerViewModel(
         session = null
     }
 
+    fun reselectDocument(uri: Uri) {
+        val state = _uiState.value
+        if (
+            state !is ViewerUiState.DocumentAccessRequired ||
+            state.isRecovering
+        ) return
+
+        _uiState.value =
+            state.copy(isRecovering = true, recoveryError = null)
+
+        viewModelScope.launch {
+            pageLibrary.reselectSource(assetId, uri)
+                .onSuccess { load() }
+                .onFailure { error ->
+                    _uiState.value =
+                        state.copy(recoveryError = error)
+                }
+        }
+    }
+
     private fun load() {
         viewModelScope.launch {
             val page =
                 pageLibrary.getPage(assetId)
                     .getOrElse { error ->
                         _uiState.value =
-                            ViewerUiState
-                                .Failed(error)
+                            ViewerUiState.Failed(error)
                         return@launch
                     }
 
@@ -52,8 +73,14 @@ class ViewerViewModel(
                     .refreshCached(assetId)
                     .getOrElse { error ->
                         _uiState.value =
-                            ViewerUiState
-                                .Failed(error)
+                            if (error is DocumentAccessException) {
+                                ViewerUiState.DocumentAccessRequired(
+                                    page = page,
+                                    cause = error,
+                                )
+                            } else {
+                                ViewerUiState.Failed(error)
+                            }
                         return@launch
                     }
 
