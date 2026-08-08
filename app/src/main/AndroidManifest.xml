@@ -17,6 +17,7 @@
         <activity
             android:name=".app.MainActivity"
             android:exported="true"
+            android:screenOrientation="portrait"
             android:theme="@style/Theme.HTMLHoster"
             android:windowSoftInputMode="adjustResize">
             <intent-filter>
